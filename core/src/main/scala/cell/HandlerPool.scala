@@ -227,11 +227,21 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
       val newRegistered = registered + (cell -> cell)
       success = cellsAwaited.compareAndSet(registered, newRegistered)
     }
+    runScheduledTasks(cell)
   }
 
-  def calcResult[K <: Key[V], V](cell: Cell[K, V]): Future[V] = {
-    registerForAwait(cell)
+  private def runScheduledTasks[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+    val oldScheduled = tasksScheduled.get()
+    val scheduledForCell = oldScheduled.getOrElse(cell, Seq())
+    val newScheduled = oldScheduled.filterKeys( _ ne cell)
+    if(!tasksScheduled.compareAndSet(oldScheduled, newScheduled)) {
+      runScheduledTasks(cell)
+    } else {
+      scheduledForCell.foreach(execute(_))
+    }
+  }
 
+  def awaitResult[K <: Key[V], V](cell: Cell[K, V]): Future[V] = {
     val p = Promise[V]
 
     cell.onComplete(_ match {
@@ -249,9 +259,11 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             completer.putFinal(v)
           case NextOutcome(v) =>
             completer.putNext(v)
-            completer.cellDependencies.foreach(calcResult(_))
+            registerForAwait(cell)
+            completer.cellDependencies.foreach(awaitResult(_))
           case NoOutcome =>
-            completer.cellDependencies.foreach(calcResult(_))
+            registerForAwait(cell)
+            completer.cellDependencies.foreach(awaitResult(_))
         }
       })
     p.future

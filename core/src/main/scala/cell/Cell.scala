@@ -336,9 +336,16 @@ class CellImpl[K <: Key[V], V](
             tryNewState(value)
           } else {
             // CAS was successful, so there was a point in time where `newVal` was in the cell. `newVal` has not been final, as it has been set via `putNext`.
-            current.nextCallbacks.filterKeys(pool.isAwaited(_))
-              .values.foreach { callbacks =>
-                callbacks.foreach(callback => callback.executeWithValue(Success(newVal), isFinal = false))
+            current.nextCallbacks
+              .foreach { e =>
+                e match {
+                  case (cell, callbacks) =>
+                    if(pool.isAwaited(cell))
+                      callbacks.foreach(callback => callback.executeWithValue(Success(newVal), isFinal = false))
+                    else
+                      callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(Success(newVal), isFinal = false)))
+                }
+
               }
             true
           }
@@ -381,8 +388,14 @@ class CellImpl[K <: Key[V], V](
         pre.completeCallbacks.filterKeys(pool.isAwaited(_)).values.foreach { callbacks =>
           callbacks.foreach(callback => callback.executeWithValue(newVal))
         }
-        pre.nextCallbacks.filterKeys(pool.isAwaited(_)).values.foreach { callbacks =>
-          callbacks.foreach(callback => callback.executeWithValue(newVal, true))
+        pre.nextCallbacks.foreach { e =>
+          e match {
+            case (cell, callbacks) =>
+              if(pool.isAwaited(cell))
+                callbacks.foreach(callback => callback.executeWithValue(newVal, true))
+              else
+                callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(newVal, true)))
+          }
         }
 
         if (depsCells.nonEmpty)
