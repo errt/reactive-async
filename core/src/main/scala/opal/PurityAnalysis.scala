@@ -6,6 +6,7 @@ import scala.collection.JavaConverters._
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import cell._
+import lattice.Key
 import org.opalj.Success
 import org.opalj.br.{ ClassFile, Method, MethodWithBody, PC }
 import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project }
@@ -55,11 +56,14 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     // 1. Initialization of key data structures (one cell(completer) per method)
     val pool = new HandlerPool()
     var methodToCellCompleter = Map.empty[Method, CellCompleter[PurityKey.type, Purity]]
+
     for {
       classFile <- project.allProjectClassFiles
       method <- classFile.methods
     } {
-      val cellCompleter = CellCompleter[PurityKey.type, Purity](pool, PurityKey)
+      val cellCompleter = CellCompleter[PurityKey.type, Purity](pool, PurityKey, _ =>
+        //analyzeWhenNext(project, methodToCellCompleter, classFile, method)
+        NoOutcome)
       methodToCellCompleter = methodToCellCompleter + ((method, cellCompleter))
     }
 
@@ -70,7 +74,8 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       classFile <- project.allProjectClassFiles.par
       method <- classFile.methods
     } {
-      pool.execute(() => analyze(project, methodToCellCompleter, classFile, method))
+      //pool.execute(() => analyze(project, methodToCellCompleter, classFile, method))
+      pool.awaitResult(methodToCellCompleter(method).cell)
     }
     val fut = pool.quiescentResolveCell
     Await.ready(fut, 30.minutes)
@@ -98,7 +103,115 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
   /**
    * Determines the purity of the given method.
    */
-  def analyze(
+  def analyzeWhenNext(
+    project: Project[URL],
+    methodToCellCompleter: Map[Method, CellCompleter[PurityKey.type, Purity]],
+    classFile: ClassFile,
+    method: Method): WhenNextOutcome[Purity] = {
+
+    import project.nonVirtualCall
+
+    val cellCompleter = methodToCellCompleter(method)
+
+    if ( // Due to a lack of knowledge, we classify all native methods or methods that
+    // belong to a library (and hence lack the body) as impure...
+    method.body.isEmpty /*HERE: method.isNative || "isLibraryMethod(method)"*/ ||
+      // for simplicity we are just focusing on methods that do not take objects as parameters
+      method.parameterTypes.exists(!_.isBaseType)) {
+      return FinalOutcome(Impure)
+    }
+
+    var hasDependencies = false
+    val declaringClassType = classFile.thisType
+    val methodDescriptor = method.descriptor
+    val methodName = method.name
+    val body = method.body.get
+    val instructions = body.instructions
+    val maxPC = instructions.size
+
+    var currentPC = 0
+    while (currentPC < maxPC) {
+      val instruction = instructions(currentPC)
+
+      (instruction.opcode: @scala.annotation.switch) match {
+        case GETSTATIC.opcode ⇒
+          val GETSTATIC(declaringClass, fieldName, fieldType) = instruction
+          import project.resolveFieldReference
+          resolveFieldReference(declaringClass, fieldName, fieldType) match {
+
+            case Some(field) if field.isFinal ⇒ NoOutcome
+            /* Nothing to do; constants do not impede purity! */
+
+            // case Some(field) if field.isPrivate /*&& field.isNonFinal*/ ⇒
+            // check if the field is effectively final
+
+            case _ ⇒
+              return FinalOutcome(Impure);
+          }
+
+        case INVOKESPECIAL.opcode | INVOKESTATIC.opcode ⇒ instruction match {
+
+          case MethodInvocationInstruction(`declaringClassType`, _, `methodName`, `methodDescriptor`) ⇒
+          // We have a self-recursive call; such calls do not influence
+          // the computation of the method's purity and are ignored.
+          // Let's continue with the evaluation of the next instruction.
+
+          case mii: NonVirtualMethodInvocationInstruction ⇒
+
+            nonVirtualCall(mii) match {
+
+              case Success(callee) ⇒
+                /* Recall that self-recursive calls are handled earlier! */
+
+                val targetCellCompleter = methodToCellCompleter(callee)
+                hasDependencies = true
+                cellCompleter.cell.whenNext(targetCellCompleter.cell, (p: Purity, isFinal: Boolean) => if (isFinal && p == Impure) FinalOutcome(Impure) else NoOutcome)
+
+              case _ /* Empty or Failure */ ⇒
+
+                // We know nothing about the target method (it is not
+                // found in the scope of the current project).
+                return FinalOutcome(Impure)
+            }
+
+        }
+
+        case NEW.opcode |
+          GETFIELD.opcode |
+          PUTFIELD.opcode | PUTSTATIC.opcode |
+          NEWARRAY.opcode | MULTIANEWARRAY.opcode | ANEWARRAY.opcode |
+          AALOAD.opcode | AASTORE.opcode |
+          BALOAD.opcode | BASTORE.opcode |
+          CALOAD.opcode | CASTORE.opcode |
+          SALOAD.opcode | SASTORE.opcode |
+          IALOAD.opcode | IASTORE.opcode |
+          LALOAD.opcode | LASTORE.opcode |
+          DALOAD.opcode | DASTORE.opcode |
+          FALOAD.opcode | FASTORE.opcode |
+          ARRAYLENGTH.opcode |
+          MONITORENTER.opcode | MONITOREXIT.opcode |
+          INVOKEDYNAMIC.opcode | INVOKEVIRTUAL.opcode | INVOKEINTERFACE.opcode ⇒
+          return FinalOutcome(Impure)
+
+        case _ ⇒
+        /* All other instructions (IFs, Load/Stores, Arith., etc.) are pure. */
+      }
+      currentPC = body.pcOfNextInstruction(currentPC)
+    }
+
+    // Every method that is not identified as being impure is (conditionally)pure.
+    if (!hasDependencies) {
+      FinalOutcome(Pure)
+      //println("Immediately Pure Method: "+method.toJava(classFile))
+    } else {
+      NextOutcome(UnknownPurity) // == NoOutcome
+    }
+  }
+
+  /**
+   * Determines the purity of the given method.
+   */
+  /*def analyze(
     project: Project[URL],
     methodToCellCompleter: Map[Method, CellCompleter[PurityKey.type, Purity]],
     classFile: ClassFile,
@@ -203,5 +316,5 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       cellCompleter.putFinal(Pure)
       //println("Immediately Pure Method: "+method.toJava(classFile))
     }
-  }
+  }*/
 }

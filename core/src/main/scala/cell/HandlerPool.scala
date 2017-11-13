@@ -233,8 +233,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   private def runScheduledTasks[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     val oldScheduled = tasksScheduled.get()
     val scheduledForCell = oldScheduled.getOrElse(cell, Seq())
-    val newScheduled = oldScheduled.filterKeys( _ ne cell)
-    if(!tasksScheduled.compareAndSet(oldScheduled, newScheduled)) {
+    val newScheduled = oldScheduled.filterKeys(_ ne cell)
+    if (!tasksScheduled.compareAndSet(oldScheduled, newScheduled)) {
       runScheduledTasks(cell)
     } else {
       scheduledForCell.foreach(execute(_))

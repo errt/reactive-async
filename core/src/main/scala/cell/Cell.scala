@@ -340,7 +340,7 @@ class CellImpl[K <: Key[V], V](
               .foreach { e =>
                 e match {
                   case (cell, callbacks) =>
-                    if(pool.isAwaited(cell))
+                    if (pool.isAwaited(cell))
                       callbacks.foreach(callback => callback.executeWithValue(Success(newVal), isFinal = false))
                     else
                       callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(Success(newVal), isFinal = false)))
@@ -391,7 +391,7 @@ class CellImpl[K <: Key[V], V](
         pre.nextCallbacks.foreach { e =>
           e match {
             case (cell, callbacks) =>
-              if(pool.isAwaited(cell))
+              if (pool.isAwaited(cell))
                 callbacks.foreach(callback => callback.executeWithValue(newVal, true))
               else
                 callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(newVal, true)))
