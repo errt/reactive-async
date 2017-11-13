@@ -3,16 +3,17 @@ package cell
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicReference
 
+import immutability.V
+
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
-import scala.concurrent.{ Future, Promise }
-
+import scala.concurrent.{Future, Promise}
 import lattice.Key
-
 import org.opalj.graphs._
+
+import scala.util.Success
 
 /* Need to have reference equality for CAS.
  */
@@ -198,6 +199,32 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         }
       }
     })
+  }
+
+  def calcResult[K <: Key[V], V](cell: Cell[K, V]): Future[V] = {
+    val p = Promise[V]
+
+    cell.onComplete(_ match {
+      // If the result is already available, this will be executed immediately.
+      case Success(v) => p.success(v)
+      case _ => p. failure(null)
+    })
+
+    if(!cell.isComplete)
+      execute(() => {
+        val completer = cell.asInstanceOf[CellImpl[K, V]]
+        val outcome = completer.init(completer.cell)
+        outcome match {
+          case FinalOutcome(v) =>
+            completer.putFinal(v)
+          case NextOutcome(v) =>
+            completer.putNext(v)
+            completer.cellDependencies.foreach(calcResult(_))
+          case NoOutcome =>
+            completer.cellDependencies.foreach(calcResult(_))
+        }
+      })
+    p.future
   }
 
   def shutdown(): Unit =

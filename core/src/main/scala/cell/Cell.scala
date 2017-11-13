@@ -50,7 +50,7 @@ trait Cell[K <: Key[V], V] {
 
   def whenNext(other: Cell[K, V], valueCallback: (V, Boolean) => WhenNextOutcome[V]): Unit
 
-  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
+//  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
 
   /**
    * Registers a call-back function to be invoked when quiescence is reached, but `this` cell has not been
@@ -90,7 +90,7 @@ object Cell {
     completer.cell
   }
 
-  def sequence[K <: Key[V], V](in: List[Cell[K, V]])(implicit pool: HandlerPool): Cell[DefaultKey[List[V]], List[V]] = {
+  /*def sequence[K <: Key[V], V](in: List[Cell[K, V]])(implicit pool: HandlerPool): Cell[DefaultKey[List[V]], List[V]] = {
     implicit val lattice: Lattice[List[V]] = Lattice.trivial[List[V]]
     val completer =
       CellCompleter[DefaultKey[List[V]], List[V]](pool, new DefaultKey[List[V]])
@@ -118,7 +118,7 @@ object Cell {
         }
     }
     completer.cell
-  }
+  }*/
 
 }
 
@@ -141,7 +141,11 @@ private object State {
     new State[K, V](lattice.empty, Map(), Map(), Map())
 }
 
-class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: Lattice[V]) extends Cell[K, V] with CellCompleter[K, V] {
+class CellImpl[K <: Key[V], V](
+    pool: HandlerPool,
+    val key: K, lattice: Lattice[V],
+    val init: Cell[K, V] => WhenNextOutcome[V]
+  ) extends Cell[K, V] with CellCompleter[K, V] {
 
   private val noDepsLatch = new CountDownLatch(1)
 
@@ -187,23 +191,23 @@ class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: Lattice[V
     else putNext(x)
   }
 
-  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)] = {
-    implicit val theLattice: Lattice[V] = lattice
-    val completer =
-      CellCompleter[DefaultKey[(V, V)], (V, V)](pool, new DefaultKey[(V, V)])
-    this.onComplete {
-      case Success(x) =>
-        that.onComplete {
-          case Success(y) =>
-            completer.putFinal((x, y))
-          case f @ Failure(_) =>
-            completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
-        }
-      case f @ Failure(_) =>
-        completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
-    }
-    completer.cell
-  }
+//  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)] = {
+//    implicit val theLattice: Lattice[V] = lattice
+//    val completer =
+//      CellCompleter[DefaultKey[(V, V)], (V, V)](pool, new DefaultKey[(V, V)])
+//    this.onComplete {
+//      case Success(x) =>
+//        that.onComplete {
+//          case Success(y) =>
+//            completer.putFinal((x, y))
+//          case f @ Failure(_) =>
+//            completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+//        }
+//      case f @ Failure(_) =>
+//        completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+//    }
+//    completer.cell
+//  }
 
   private[this] def currentState(): State[K, V] =
     state.get() match {
