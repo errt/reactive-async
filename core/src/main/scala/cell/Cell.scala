@@ -11,12 +11,7 @@ import scala.util.{ Failure, Success, Try }
 
 import lattice.{ Lattice, LatticeViolationException, Key, DefaultKey }
 
-//sealed trait WhenNextPredicate
-//case object WhenNext extends WhenNextPredicate
-//case object WhenNextComplete extends WhenNextPredicate
-//case object FalsePred extends WhenNextPredicate
-
-sealed class WhenNextOutcome[+V]
+sealed trait WhenNextOutcome[+V]
 case class NextOutcome[+V](x: V) extends WhenNextOutcome[V]
 case class FinalOutcome[+V](x: V) extends WhenNextOutcome[V]
 case object NoOutcome extends WhenNextOutcome[Nothing]
@@ -50,7 +45,7 @@ trait Cell[K <: Key[V], V] {
 
   def whenNext(other: Cell[K, V], valueCallback: (V, Boolean) => WhenNextOutcome[V]): Unit
 
-//  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
+  //  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
 
   /**
    * Registers a call-back function to be invoked when quiescence is reached, but `this` cell has not been
@@ -142,10 +137,9 @@ private object State {
 }
 
 class CellImpl[K <: Key[V], V](
-    pool: HandlerPool,
-    val key: K, lattice: Lattice[V],
-    val init: Cell[K, V] => WhenNextOutcome[V]
-  ) extends Cell[K, V] with CellCompleter[K, V] {
+  pool: HandlerPool,
+  val key: K, lattice: Lattice[V],
+  val init: Cell[K, V] => WhenNextOutcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
 
   private val noDepsLatch = new CountDownLatch(1)
 
@@ -191,23 +185,23 @@ class CellImpl[K <: Key[V], V](
     else putNext(x)
   }
 
-//  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)] = {
-//    implicit val theLattice: Lattice[V] = lattice
-//    val completer =
-//      CellCompleter[DefaultKey[(V, V)], (V, V)](pool, new DefaultKey[(V, V)])
-//    this.onComplete {
-//      case Success(x) =>
-//        that.onComplete {
-//          case Success(y) =>
-//            completer.putFinal((x, y))
-//          case f @ Failure(_) =>
-//            completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
-//        }
-//      case f @ Failure(_) =>
-//        completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
-//    }
-//    completer.cell
-//  }
+  //  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)] = {
+  //    implicit val theLattice: Lattice[V] = lattice
+  //    val completer =
+  //      CellCompleter[DefaultKey[(V, V)], (V, V)](pool, new DefaultKey[(V, V)])
+  //    this.onComplete {
+  //      case Success(x) =>
+  //        that.onComplete {
+  //          case Success(y) =>
+  //            completer.putFinal((x, y))
+  //          case f @ Failure(_) =>
+  //            completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+  //        }
+  //      case f @ Failure(_) =>
+  //        completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+  //    }
+  //    completer.cell
+  //  }
 
   private[this] def currentState(): State[K, V] =
     state.get() match {
@@ -342,9 +336,10 @@ class CellImpl[K <: Key[V], V](
             tryNewState(value)
           } else {
             // CAS was successful, so there was a point in time where `newVal` was in the cell. `newVal` has not been final, as it has been set via `putNext`.
-            current.nextCallbacks.values.foreach { callbacks =>
-              callbacks.foreach(callback => callback.executeWithValue(Success(newVal), false))
-            }
+            current.nextCallbacks.filterKeys(pool.isAwaited(_))
+              .values.foreach { callbacks =>
+                callbacks.foreach(callback => callback.executeWithValue(Success(newVal), isFinal = false))
+              }
             true
           }
         } else true
@@ -383,10 +378,10 @@ class CellImpl[K <: Key[V], V](
       case (pre: State[K, V], newVal: Try[V]) =>
         val depsCells = pre.deps.keys
 
-        pre.completeCallbacks.values.foreach { callbacks =>
+        pre.completeCallbacks.filterKeys(pool.isAwaited(_)).values.foreach { callbacks =>
           callbacks.foreach(callback => callback.executeWithValue(newVal))
         }
-        pre.nextCallbacks.values.foreach { callbacks =>
+        pre.nextCallbacks.filterKeys(pool.isAwaited(_)).values.foreach { callbacks =>
           callbacks.foreach(callback => callback.executeWithValue(newVal, true))
         }
 

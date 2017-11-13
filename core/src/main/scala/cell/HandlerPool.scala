@@ -9,7 +9,7 @@ import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ Future, Promise }
 import lattice.Key
 import org.opalj.graphs._
 
@@ -24,11 +24,30 @@ class PoolState(val handlers: List[() => Unit] = List(), val submittedTasks: Int
 
 class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
 
+  def schedule[K <: Key[V], V](cell: Cell[K, V], task: Runnable): Unit = {
+    // TODO Is this safe? What if a cell gets awaited right before the task is added?
+    if (cellsAwaited.get().contains(cell)) execute(task)
+    else {
+      val oldTasks = tasksScheduled.get()
+      val tasksForCell = oldTasks.getOrElse(cell, Seq()) ++ Seq(task) // Is the second Seq() needed? I guess not!
+      val newTasks = oldTasks + (cell -> tasksForCell)
+      if (!tasksScheduled.compareAndSet(oldTasks, newTasks)) {
+        schedule(cell, task)
+      }
+    }
+  }
+
   private val pool: ForkJoinPool = new ForkJoinPool(parallelism)
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
+
+  private val cellsAwaited = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
+
+  /** Whenever a cell gets awaited, run the mapped runnables for that cell. */
+  // Maybe this could be merged with cellsNotDone or cellsAwaited?
+  private val tasksScheduled = new AtomicReference[Map[Cell[_, _], Seq[Runnable]]](Map())
 
   @tailrec
   final def onQuiescent(handler: () => Unit): Unit = {
@@ -201,16 +220,27 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     })
   }
 
+  private def registerForAwait[K <: Key[V], V](cell: Cell[K, V]) = {
+    var success = false
+    while (!success) {
+      val registered = cellsAwaited.get()
+      val newRegistered = registered + (cell -> cell)
+      success = cellsAwaited.compareAndSet(registered, newRegistered)
+    }
+  }
+
   def calcResult[K <: Key[V], V](cell: Cell[K, V]): Future[V] = {
+    registerForAwait(cell)
+
     val p = Promise[V]
 
     cell.onComplete(_ match {
       // If the result is already available, this will be executed immediately.
       case Success(v) => p.success(v)
-      case _ => p. failure(null)
+      case _ => p.failure(null)
     })
 
-    if(!cell.isComplete)
+    if (!cell.isComplete)
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
         val outcome = completer.init(completer.cell)
@@ -226,6 +256,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
       })
     p.future
   }
+
+  def isAwaited[K <: Key[V], V](cell: Cell[K, V]) = cellsAwaited.get().contains(cell)
 
   def shutdown(): Unit =
     pool.shutdown()

@@ -101,8 +101,7 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     cell1.whenNext(completer2.cell, (x: Int, isFinal: Boolean) =>
       if ((x == 10) && (isFinal)) FinalOutcome(20)
-      else NoOutcome
-    )
+      else NoOutcome)
 
     cell1.onComplete {
       case Success(v) =>
@@ -129,9 +128,8 @@ class BaseSuite extends FunSuite {
 
     val cell1 = completer1.cell
     cell1.whenNext(completer2.cell, (x, isFinal) =>
-      if(isFinal && x == 10) FinalOutcome(20)
-      else NoOutcome
-    )
+      if (isFinal && x == 10) FinalOutcome(20)
+      else NoOutcome)
 
     cell1.onComplete {
       case Success(v) =>
@@ -158,9 +156,8 @@ class BaseSuite extends FunSuite {
 
     val cell1 = completer1.cell
     cell1.whenNext(completer2.cell, (x, isFinal) =>
-      if(isFinal && x == 10) FinalOutcome(20)
-      else NoOutcome
-    )
+      if (isFinal && x == 10) FinalOutcome(20)
+      else NoOutcome)
 
     completer2.putFinal(9)
 
@@ -179,8 +176,7 @@ class BaseSuite extends FunSuite {
 
     completer1.cell.whenNext(completer2.cell, (imm: Immutability, isFinal: Boolean) =>
       if (imm == Mutable) FinalOutcome(Mutable)
-      else NoOutcome
-    )
+      else NoOutcome)
 
     completer1.putFinal(Immutable)
     assert(completer2.cell.numCompleteCallbacks == 0)
@@ -290,8 +286,7 @@ class BaseSuite extends FunSuite {
     })
     cell1.whenNext(completer2.cell, (x, isFinal) =>
       if (isFinal && x == 10) FinalOutcome(20)
-      else NoOutcome
-    )
+      else NoOutcome)
 
     assert(cell1.numDependencies == 2)
 
@@ -673,12 +668,10 @@ class BaseSuite extends FunSuite {
     val cell2 = completer2.cell
     cell1.whenNext(cell2, (x: Int, isFinal: Boolean) =>
       if (isFinal && x == 1) FinalOutcome(1)
-      else NoOutcome
-    )
+      else NoOutcome)
     cell2.whenNext(cell1, (x: Int, isFinal: Boolean) =>
       if (isFinal && x == 1) FinalOutcome(1)
-      else NoOutcome
-    )
+      else NoOutcome)
     val incompleteFut = pool.quiescentIncompleteCells
     val cells = Await.result(incompleteFut, 2.seconds)
     assert(cells.map(_.key).toString == "List(key1, key2)")
@@ -692,12 +685,10 @@ class BaseSuite extends FunSuite {
     val cell2 = completer2.cell
     cell1.whenNext(cell2, (x, isFinal) =>
       if (isFinal && x == 0) FinalOutcome(0)
-        else NoOutcome
-    )
+      else NoOutcome)
     cell2.whenNext(cell1, (x, isFinal) =>
       if (isFinal && x == 0) FinalOutcome(0)
-      else NoOutcome
-    )
+      else NoOutcome)
     val qfut = pool.quiescentResolveCell
     Await.ready(qfut, 2.seconds)
     val incompleteFut = pool.quiescentIncompleteCells
