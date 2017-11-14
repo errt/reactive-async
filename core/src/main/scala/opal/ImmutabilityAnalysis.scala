@@ -5,13 +5,12 @@ import java.net.URL
 import org.opalj.fpcf._
 
 import scala.collection.JavaConverters._
-
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
 import cell._
-import org.opalj.br.{ Field, ClassFile, ObjectType }
-import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project, PropertyStoreKey }
+import lattice.Key
+import org.opalj.br.{ClassFile, Field, ObjectType}
+import org.opalj.br.analyses.{BasicReport, DefaultOneStepAnalysis, Project, PropertyStoreKey}
 import org.opalj.br.analyses.TypeExtensibilityKey
 import org.opalj.fpcf.analyses.FieldMutabilityAnalysis
 import org.opalj.fpcf.properties.FieldMutability
@@ -139,56 +138,73 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
     // 1. Initialization of key data structures (two cell(completer) per class file)
     // One for Object Immutability and one for Type Immutability.
     val pool = new HandlerPool()
+    var classFileToObjectTypeCellCompleter =
+      Map.empty[ClassFile, (CellCompleter[ImmutabilityKey.type, Immutability], CellCompleter[ImmutabilityKey.type, Immutability])]
 
     // classFileToObjectTypeCellCompleter._1 = ObjectImmutability
     // classFileToObjectTypeCellCompleter._2 = TypeImmutability
-    var classFileToObjectTypeCellCompleter =
-      Map.empty[ClassFile, (CellCompleter[ImmutabilityKey.type, Immutability], CellCompleter[ImmutabilityKey.type, Immutability])]
+    val classHierarchy = project.classHierarchy
+    import classHierarchy.allSubtypes
+    import classHierarchy.rootTypes
+    import classHierarchy.isInterface
+    val objectClassFileOption = project.classFile(ObjectType.Object)
+    val allInterfaces = project.allProjectClassFiles.par.filter(cf => cf.isInterfaceDeclaration).toList
+    val typesForWhichItMayBePossibleToComputeTheMutability = allSubtypes(ObjectType.Object, reflexive = true)
+    val unexpectedRootTypes = rootTypes.filter(rt ⇒ (rt ne ObjectType.Object) && !isInterface(rt).isNo)
+    val unexpectedRootTypesCheck = unexpectedRootTypes.map(rt ⇒ allSubtypes(rt, reflexive = true)).flatten.view.
+    filter(ot ⇒ !typesForWhichItMayBePossibleToComputeTheMutability.contains(ot))
+
+
+
+    def unexpectedTypesCheck[K <: Key[V], V](cell: Cell[K, V]) = {
+      unexpectedRootTypesCheck.
+        exists(ot ⇒ project.classFile(ot) exists { cf ⇒
+          classFileToObjectTypeCellCompleter(cf)._1.cell == cell }
+        )
+    }
     for {
       classFile <- project.allProjectClassFiles
     } {
-      val cellCompleter1 = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey)
+      val cellCompleter1 = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey, cell => {
+        if (objectClassFileOption.contains(classFile)
+        || allInterfaces.contains(classFile)) FinalOutcome(Immutable)
+        else
+          if(!cell.isComplete)
+            objectImmutabilityAnalysisWhenNext(project, classFileToObjectTypeCellCompleter, manager, classFile)
+          else
+            NoOutcome
+      })
       val cellCompleter2 = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey)
       classFileToObjectTypeCellCompleter = classFileToObjectTypeCellCompleter + ((classFile, (cellCompleter1, cellCompleter2)))
     }
 
     // java.lang.Object is by definition immutable
-    val objectClassFileOption = project.classFile(ObjectType.Object)
-    objectClassFileOption.foreach { cf =>
-      classFileToObjectTypeCellCompleter(cf)._1.putFinal(Immutable)
-      classFileToObjectTypeCellCompleter(cf)._2.putFinal(Mutable) // Should the TypeImmutability be Mutable?
-    }
+
+//    objectClassFileOption.foreach { cf =>
+//      classFileToObjectTypeCellCompleter(cf)._2.putFinal(Mutable) // Should the TypeImmutability be Mutable?
+//    }
 
     // All interfaces are by definition immutable
-    val allInterfaces = project.allProjectClassFiles.par.filter(cf => cf.isInterfaceDeclaration).toList
-    allInterfaces.foreach(cf => classFileToObjectTypeCellCompleter(cf)._1.putFinal(Immutable))
 
-    val classHierarchy = project.classHierarchy
-    import classHierarchy.allSubtypes
-    import classHierarchy.rootTypes
-    import classHierarchy.isInterface
     // All classes that do not have complete superclass information are mutable
     // due to the lack of knowledge.
-    val typesForWhichItMayBePossibleToComputeTheMutability = allSubtypes(ObjectType.Object, reflexive = true)
-    val unexpectedRootTypes = rootTypes.filter(rt ⇒ (rt ne ObjectType.Object) && !isInterface(rt).isNo)
-    unexpectedRootTypes.map(rt ⇒ allSubtypes(rt, reflexive = true)).flatten.view.
-      filter(ot ⇒ !typesForWhichItMayBePossibleToComputeTheMutability.contains(ot)).
-      foreach(ot ⇒ project.classFile(ot) foreach { cf ⇒
-        classFileToObjectTypeCellCompleter(cf)._1.putFinal(Mutable)
-      })
+
+
 
     // 2. trigger analyses
     for {
       classFile <- project.allProjectClassFiles.par
     } {
-      pool.execute(() => {
-        if (!classFileToObjectTypeCellCompleter(classFile)._1.cell.isComplete)
-          objectImmutabilityAnalysis(project, classFileToObjectTypeCellCompleter, manager, classFile)
-      })
-      pool.execute(() => {
-        if (!classFileToObjectTypeCellCompleter(classFile)._2.cell.isComplete)
-          typeImmutabilityAnalysis(project, classFileToObjectTypeCellCompleter, manager, classFile)
-      })
+      pool.awaitResult(classFileToObjectTypeCellCompleter(classFile)._1.cell)
+//      pool.awaitResult(classFileToObjectTypeCellCompleter(classFile)._2.cell)
+//      pool.execute(() => {
+//        if (!classFileToObjectTypeCellCompleter(classFile)._1.cell.isComplete)
+//          objectImmutabilityAnalysis(project, classFileToObjectTypeCellCompleter, manager, classFile)
+//      })
+//      pool.execute(() => {
+//        if (!classFileToObjectTypeCellCompleter(classFile)._2.cell.isComplete)
+//          typeImmutabilityAnalysis(project, classFileToObjectTypeCellCompleter, manager, classFile)
+//      })
     }
     pool.whileQuiescentResolveCell
     pool.shutdown()
@@ -210,6 +226,85 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
       conditionallyImmutableClassFilesInfo.toList.sorted ++ mutableClassFilesInfo.toList.sorted)
     BasicReport(sortedClassFilesInfo)
   }
+
+  /**
+    *  Determines a class files' ObjectImmutability.
+    */
+  def objectImmutabilityAnalysisWhenNext(
+                                  project: Project[URL],
+                                  classFileToObjectTypeCellCompleter: Map[ClassFile, (CellCompleter[ImmutabilityKey.type, Immutability], CellCompleter[ImmutabilityKey.type, Immutability])],
+                                  manager: FPCFAnalysesManager,
+                                  cf: ClassFile): WhenNextOutcome[Immutability] = {
+    val cellCompleter = classFileToObjectTypeCellCompleter(cf)._1
+
+    val classHierarchy = project.classHierarchy
+    val directSuperTypes = classHierarchy.directSupertypes(cf.thisType)
+
+    // Check fields to determine ObjectImmutability
+    val nonFinalInstanceFields = cf.fields.collect { case f if !f.isStatic && !f.isFinal => f }
+
+    if (!nonFinalInstanceFields.isEmpty)
+      return FinalOutcome(Mutable)
+
+    // If the cell hasn't already been completed with an ObjectImmutability, then it is
+    // dependent on FieldMutability and its superclasses
+    if (!cellCompleter.cell.isComplete) {
+      if (cf.fields.exists(f => !f.isStatic && f.fieldType.isArrayType))
+        cellCompleter.putNext(ConditionallyImmutable)
+      else {
+        val fieldTypes: Set[ObjectType] =
+          cf.fields.collect {
+            case f if !f.isStatic && f.fieldType.isObjectType => f.fieldType.asObjectType
+          }.toSet
+
+        val hasUnresolvableDependencies =
+          fieldTypes.exists { t =>
+            project.classFile(t) match {
+              case None => true /* we have an unresolved dependency */
+              case Some(classFile) => false /* do nothing */
+            }
+          }
+
+        if (hasUnresolvableDependencies)
+          cellCompleter.putNext(ConditionallyImmutable)
+        else {
+          val finalInstanceFields = cf.fields.collect { case f if !f.isStatic && f.isFinal => f }
+          finalInstanceFields.foreach { f =>
+            if (f.fieldType.isObjectType) {
+              project.classFile(f.fieldType.asObjectType) match {
+                case Some(classFile) =>
+                  val fieldTypeCell = classFileToObjectTypeCellCompleter(classFile)._2.cell
+                  cellCompleter.cell.whenNext(
+                    fieldTypeCell,
+                    (fieldImm: Immutability, _) => fieldImm match {
+                      case Mutable | ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
+                      case Immutable => NoOutcome
+                    })
+                case None => /* Do nothing */
+              }
+            }
+          }
+        }
+      }
+      // Check with superclass to determine ObjectImmutability
+      val directSuperClasses = directSuperTypes.
+        filter(superType => project.classFile(superType) != None).
+        map(superType => project.classFile(superType).get)
+
+      directSuperClasses foreach { superClass =>
+        cellCompleter.cell.whenNext(
+          classFileToObjectTypeCellCompleter(superClass)._1.cell,
+          (imm: Immutability, _) => imm match {
+            case Immutable => NoOutcome
+            case Mutable => FinalOutcome(imm)
+            case ConditionallyImmutable => NextOutcome(imm)
+          })
+      }
+      NoOutcome // FIXME
+    }
+    else NoOutcome
+  }
+
 
   /**
    *  Determines a class files' ObjectImmutability.

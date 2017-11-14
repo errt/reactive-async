@@ -43,7 +43,7 @@ object CellCompleter {
    * `DefaultKey[V]`, no other key would make sense.
    */
   def completed[V](pool: HandlerPool, result: V)(implicit lattice: Lattice[V]): CellCompleter[DefaultKey[V], V] = {
-    val impl = new CellImpl[DefaultKey[V], V](pool, new DefaultKey[V], lattice, (_: Cell[DefaultKey[V], V]) => NoOutcome)
+    val impl = new CellImpl[DefaultKey[V], V](pool, new DefaultKey[V], lattice, _ => NoOutcome)
     pool.register(impl)
     impl.putFinal(result)
     impl

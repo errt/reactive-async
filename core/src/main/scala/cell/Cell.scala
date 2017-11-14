@@ -385,17 +385,18 @@ class CellImpl[K <: Key[V], V](
       case (pre: State[K, V], newVal: Try[V]) =>
         val depsCells = pre.deps.keys
 
-        pre.completeCallbacks.filterKeys(pool.isAwaited(_)).values.foreach { callbacks =>
-          callbacks.foreach(callback => callback.executeWithValue(newVal))
+        pre.completeCallbacks.foreach {
+          case (cell, callbacks) =>
+            if (pool.isAwaited(cell))
+              callbacks.foreach(callback => callback.executeWithValue(newVal))
+            else callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(newVal)))
         }
-        pre.nextCallbacks.foreach { e =>
-          e match {
-            case (cell, callbacks) =>
-              if (pool.isAwaited(cell))
-                callbacks.foreach(callback => callback.executeWithValue(newVal, true))
-              else
-                callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(newVal, true)))
-          }
+        pre.nextCallbacks.foreach {
+          case (cell, callbacks) =>
+            if (pool.isAwaited(cell))
+              callbacks.foreach(callback => callback.executeWithValue(newVal, true))
+            else
+              callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(newVal, true)))
         }
 
         if (depsCells.nonEmpty)
