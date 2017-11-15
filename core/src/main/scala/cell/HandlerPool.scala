@@ -9,8 +9,8 @@ import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.{ Future, Promise }
-import lattice.Key
+import scala.concurrent.{Future, Promise}
+import lattice.{DefaultKey, Key, Lattice}
 import org.opalj.graphs._
 
 import scala.util.Success
@@ -24,7 +24,8 @@ class PoolState(val handlers: List[() => Unit] = List(), val submittedTasks: Int
 
 class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
 
-  def schedule[K <: Key[V], V](cell: Cell[K, V], task: Runnable): Unit = {
+  @tailrec
+  final protected[cell] def schedule[K <: Key[V], V](cell: Cell[K, V], task: Runnable): Unit = {
     // TODO Is this safe? What if a cell gets awaited right before the task is added?
     if (cellsAwaited.get().contains(cell)) execute(task)
     else {
@@ -49,6 +50,19 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   // Maybe this could be merged with cellsNotDone or cellsAwaited?
   private val tasksScheduled = new AtomicReference[Map[Cell[_, _], Seq[Runnable]]](Map())
 
+  def createCell[K <: Key[V], V](key: K, init: (Cell[K, V]) => WhenNextOutcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
+    CellCompleter(this, key, init)(lattice).cell
+  }
+
+  def createCell[K <: Key[V], V](key: K, init: V)(implicit lattice: Lattice[V]): Cell[K, V] = {
+    val completer = CellCompleter(this, key, (_: Cell[K, V]) => NextOutcome(init))(lattice)
+    completer.cell
+  }
+
+  def createCompletedCell[V](result: V)(implicit lattice: Lattice[V]): Cell[DefaultKey[V], V] = {
+    CellCompleter.completed(this, result)(lattice).cell
+  }
+
   @tailrec
   final def onQuiescent(handler: () => Unit): Unit = {
     val state = poolState.get()
@@ -62,13 +76,13 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     }
   }
 
-  def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+  private[cell] def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     val registered = cellsNotDone.get()
     val newRegistered = registered + (cell -> cell)
     cellsNotDone.compareAndSet(registered, newRegistered)
   }
 
-  def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+  private[cell] def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     var success = false
     while (!success) {
       val registered = cellsNotDone.get()
@@ -171,10 +185,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   //def execute(f : => Unit) : Unit =
   //  execute(new Runnable{def run() : Unit = f})
 
-  def execute(fun: () => Unit): Unit =
+  protected[cell] def execute(fun: () => Unit): Unit =
     execute(new Runnable { def run(): Unit = fun() })
 
-  def execute(task: Runnable): Unit = {
+  protected[cell] def execute(task: Runnable): Unit = {
     // Submit task to the pool
     var submitSuccess = false
     while (!submitSuccess) {
@@ -244,6 +258,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   def awaitResult[K <: Key[V], V](cell: Cell[K, V]): Future[V] = {
     val p = Promise[V]
 
+    registerForAwait(cell)
+
     cell.onComplete(_ match {
       // If the result is already available, this will be executed immediately.
       case Success(v) => p.success(v)
@@ -259,10 +275,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             completer.putFinal(v)
           case NextOutcome(v) =>
             completer.putNext(v)
-            registerForAwait(cell)
             completer.cellDependencies.foreach(awaitResult(_))
           case NoOutcome =>
-            registerForAwait(cell)
             completer.cellDependencies.foreach(awaitResult(_))
         }
       })
