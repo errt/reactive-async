@@ -11,11 +11,6 @@ import scala.util.{ Failure, Success, Try }
 
 import lattice.{ Lattice, LatticeViolationException, Key, DefaultKey }
 
-sealed trait WhenNextOutcome[+V]
-case class NextOutcome[+V](x: V) extends WhenNextOutcome[V]
-case class FinalOutcome[+V](x: V) extends WhenNextOutcome[V]
-case object NoOutcome extends WhenNextOutcome[Nothing]
-
 trait Cell[K <: Key[V], V] {
   def key: K
 
@@ -337,15 +332,12 @@ class CellImpl[K <: Key[V], V](
           } else {
             // CAS was successful, so there was a point in time where `newVal` was in the cell. `newVal` has not been final, as it has been set via `putNext`.
             current.nextCallbacks
-              .foreach { e =>
-                e match {
-                  case (cell, callbacks) =>
-                    if (pool.isAwaited(cell))
-                      callbacks.foreach(callback => callback.executeWithValue(Success(newVal), isFinal = false))
-                    else
-                      callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(Success(newVal), isFinal = false)))
-                }
-
+              .foreach {
+                case (cell, callbacks) =>
+                  if (pool.isAwaited(cell))
+                    callbacks.foreach(callback => callback.executeWithValue(Success(newVal), isFinal = false))
+                  else
+                    callbacks.foreach(callback => pool.schedule(cell, () => callback.executeWithValue(Success(newVal), isFinal = false)))
               }
             true
           }
