@@ -51,20 +51,17 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     project: Project[URL],
     parameters: Seq[String] = List.empty,
     isInterrupted: () ⇒ Boolean): BasicReport = {
-
     val startTime = System.currentTimeMillis // Used for measuring execution time
     // 1. Initialization of key data structures (one cell(completer) per method)
     val pool = new HandlerPool()
-    var methodToCellCompleter = Map.empty[Method, CellCompleter[PurityKey.type, Purity]]
+    var methodToCell = Map.empty[Method, Cell[PurityKey.type, Purity]]
 
     for {
       classFile <- project.allProjectClassFiles
       method <- classFile.methods
     } {
-      val cellCompleter = CellCompleter[PurityKey.type, Purity](pool, PurityKey, _ =>
-        //analyzeWhenNext(project, methodToCellCompleter, classFile, method)
-        NoOutcome)
-      methodToCellCompleter = methodToCellCompleter + ((method, cellCompleter))
+      val cell = pool.createCell[PurityKey.type, Purity](PurityKey, (_: Cell[PurityKey.type, Purity]) => NoOutcome)
+      methodToCell = methodToCell + ((method, cell))
     }
 
     val middleTime = System.currentTimeMillis
@@ -74,8 +71,8 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       classFile <- project.allProjectClassFiles.par
       method <- classFile.methods
     } {
-      //pool.execute(() => analyze(project, methodToCellCompleter, classFile, method))
-      pool.awaitResult(methodToCellCompleter(method).cell)
+      //pool.execute(() => analyze(project, methodToCell, classFile, method))
+      pool.awaitResult(methodToCell(method))
     }
     val fut = pool.quiescentResolveCell
     Await.ready(fut, 30.minutes)
@@ -87,7 +84,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     val analysisTime = endTime - middleTime
     val combinedTime = endTime - startTime
 
-    val pureMethods = methodToCellCompleter.filter(_._2.cell.getResult match {
+    val pureMethods = methodToCell.filter(_._2.getResult match {
       case Pure => true
       case _ => false
     }).map(_._1)
@@ -104,14 +101,14 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
    * Determines the purity of the given method.
    */
   def analyzeWhenNext(
-    project: Project[URL],
-    methodToCellCompleter: Map[Method, CellCompleter[PurityKey.type, Purity]],
-    classFile: ClassFile,
-    method: Method): WhenNextOutcome[Purity] = {
+      project: Project[URL],
+      methodToCell: Map[Method, Cell[PurityKey.type, Purity]],
+      classFile: ClassFile,
+      method: Method): WhenNextOutcome[Purity] = {
 
     import project.nonVirtualCall
 
-    val cellCompleter = methodToCellCompleter(method)
+    val cellCompleter = methodToCell(method)
 
     if ( // Due to a lack of knowledge, we classify all native methods or methods that
     // belong to a library (and hence lack the body) as impure...
@@ -163,9 +160,9 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
               case Success(callee) ⇒
                 /* Recall that self-recursive calls are handled earlier! */
 
-                val targetCellCompleter = methodToCellCompleter(callee)
+                val targetCell = methodToCell(callee)
                 hasDependencies = true
-                cellCompleter.cell.whenNext(targetCellCompleter.cell, (p: Purity, isFinal: Boolean) => if (isFinal && p == Impure) FinalOutcome(Impure) else NoOutcome)
+                cellCompleter.whenNext(targetCell, (p: Purity, isFinal: Boolean) => if (isFinal && p == Impure) FinalOutcome(Impure) else NoOutcome)
 
               case _ /* Empty or Failure */ ⇒
 

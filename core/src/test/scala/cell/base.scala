@@ -21,7 +21,7 @@ class BaseSuite extends FunSuite {
     val latch = new CountDownLatch(1)
 
     val pool = new HandlerPool
-    val completer = CellCompleter[StringIntKey, Int](pool, "somekey", _ => {println("init cell"); FinalOutcome(5)})
+    val completer = CellCompleter[StringIntKey, Int](pool, "somekey", _ => FinalOutcome(5))
     val cell = completer.cell
     cell.onComplete {
       case Success(v) =>
@@ -400,11 +400,7 @@ class BaseSuite extends FunSuite {
   }
 
   test("whenNext: Dependencies concurrency test") {
-    assert(false)
-    // TODO This tests needs to be updated to the new API.
-    // This does not look easy, because it is very artificial.
-    // What should it test now?
-    /*val pool = new HandlerPool
+    val pool = new HandlerPool
     val latch = new CountDownLatch(10000)
     var completer1:  CellCompleter[ImmutabilityKey.type, Immutability] = null
     var completer2:  CellCompleter[ImmutabilityKey.type, Immutability] = null
@@ -422,12 +418,13 @@ class BaseSuite extends FunSuite {
         latch.countDown()
       })
     }
+    pool.awaitResult(completer1.cell)
 
     latch.await()
 
     assert(completer1.cell.numDependencies == 10000)
 
-    pool.shutdown()*/
+    pool.shutdown()
   }
 
   test("whenNext: One cell with several dependencies on the same cell concurrency test") {
@@ -704,8 +701,7 @@ class BaseSuite extends FunSuite {
       if (isFinal && x == 1) FinalOutcome(1)
       else NoOutcome
     )
-    pool.awaitResult(cell1)
-    pool.awaitResult(cell2)
+
     // Maybe this could be done better by actually using the Future[] instead of Await.result()
     val incompleteFut = pool.quiescentIncompleteCells
     val cells = Await.result(incompleteFut, 2.seconds)
@@ -727,8 +723,6 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     )
 
-    pool.awaitResult(cell1)
-    pool.awaitResult(cell2)
     // Maybe this could be done better by actually using the Future[] instead of Await.result()
     val qfut = pool.quiescentResolveCell
     Await.ready(qfut, 2.seconds)
@@ -799,32 +793,32 @@ class BaseSuite extends FunSuite {
 
     assert(finalRes.size == 0, report.mkString("\n"))
   }
+
   test("purity analysis with Demo.java: impure methods") {
-    val file = new File("core")
-    val lib = Project(file)
+      val file = new File("core")
+      val lib = Project(file)
 
-    val report = PurityAnalysis.doAnalyze(lib, List.empty, () => false).toConsoleString.split("\n")
+      val report = PurityAnalysis.doAnalyze(lib, List.empty, () => false).toConsoleString.split("\n")
+      val impureMethods = List(
+        "public static int impure(int)",
+        "static int npfoo(int)",
+        "static int npbar(int)",
+        "static int mm1(int)",
+        "static int mm2(int)",
+        "static int mm3(int)",
+        "static int m1np(int)",
+        "static int m2np(int)",
+        "static int m3np(int)",
+        "static int cpure(int)",
+        "static int cpureCallee(int)",
+        "static int cpureCalleeCallee1(int)",
+        "static int cpureCalleeCallee2(int)",
+        "static int cpureCalleeCalleeCallee(int)",
+        "static int cpureCalleeCalleeCalleeCallee(int)")
 
-    val impureMethods = List(
-      "public static int impure(int)",
-      "static int npfoo(int)",
-      "static int npbar(int)",
-      "static int mm1(int)",
-      "static int mm2(int)",
-      "static int mm3(int)",
-      "static int m1np(int)",
-      "static int m2np(int)",
-      "static int m3np(int)",
-      "static int cpure(int)",
-      "static int cpureCallee(int)",
-      "static int cpureCalleeCallee1(int)",
-      "static int cpureCalleeCallee2(int)",
-      "static int cpureCalleeCalleeCallee(int)",
-      "static int cpureCalleeCalleeCalleeCallee(int)")
+      val finalRes = impureMethods.filter(report.contains(_))
 
-    val finalRes = impureMethods.filter(report.contains(_))
-
-    assert(finalRes.size == 0)
+      assert(finalRes.size == 0)
   }
 
   test("PurityLattice: successful joins") {
@@ -856,7 +850,7 @@ class BaseSuite extends FunSuite {
       case e: Exception => assert(false)
     }
   }
-  /*
+
 
   test("putNext: Successful, using ImmutabilityLattce") {
     val pool = new HandlerPool
@@ -1002,7 +996,6 @@ class BaseSuite extends FunSuite {
 
     pool.shutdown()
   }
-*/
 
   /*test("ImmutabilityAnalysis: Concurrency") {
     val file = new File("lib")
