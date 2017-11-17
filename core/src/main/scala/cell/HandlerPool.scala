@@ -50,7 +50,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * @tparam V The type of the values.
     * @return Returns a cell.
     */
-  def createCell[K <: Key[V], V](key: K, init: (Cell[K, V]) => WhenNextOutcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
+  def createCell[K <: Key[V], V](key: K, init: () => WhenNextOutcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
     CellCompleter(this, key, init)(lattice).cell
   }
 
@@ -319,7 +319,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     if (!cell.isComplete)
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
-        val outcome = completer.init(completer.cell)
+        val outcome = completer.init()
         outcome match {
           case FinalOutcome(v) =>
             completer.putFinal(v)

@@ -60,7 +60,10 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       classFile <- project.allProjectClassFiles
       method <- classFile.methods
     } {
-      val cell = pool.createCell[PurityKey.type, Purity](PurityKey, (_: Cell[PurityKey.type, Purity]) => NoOutcome)
+      val cell = pool.createCell[PurityKey.type, Purity](PurityKey, () => {
+        //analyzeWhenNext(project, methodToCell, classFile, method)
+        NoOutcome
+      })
       methodToCell = methodToCell + ((method, cell))
     }
 
@@ -71,8 +74,10 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       classFile <- project.allProjectClassFiles.par
       method <- classFile.methods
     } {
-      //pool.execute(() => analyze(project, methodToCell, classFile, method))
-      pool.awaitResult(methodToCell(method))
+//      pool.execute(() => analyze(project, methodToCell, classFile, method))
+//      pool.triggerExecution(methodToCell(method))
+      pool.createCell[PurityKey.type, Purity](PurityKey, () => NoOutcome)
+        .whenNext(methodToCell(method), (_, _) => NoOutcome)
     }
     val fut = pool.quiescentResolveCell
     Await.ready(fut, 30.minutes)
@@ -105,7 +110,6 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       methodToCell: Map[Method, Cell[PurityKey.type, Purity]],
       classFile: ClassFile,
       method: Method): WhenNextOutcome[Purity] = {
-
     import project.nonVirtualCall
 
     val cellCompleter = methodToCell(method)

@@ -134,7 +134,7 @@ private object State {
 class CellImpl[K <: Key[V], V](
   pool: HandlerPool,
   val key: K, lattice: Lattice[V],
-  val init: Cell[K, V] => WhenNextOutcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
+  val init: () => WhenNextOutcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
 
   private val noDepsLatch = new CountDownLatch(1)
 

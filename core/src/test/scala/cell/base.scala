@@ -21,7 +21,7 @@ class BaseSuite extends FunSuite {
     val latch = new CountDownLatch(1)
 
     val pool = new HandlerPool
-    val completer = CellCompleter[StringIntKey, Int](pool, "somekey", _ => FinalOutcome(5))
+    val completer = CellCompleter[StringIntKey, Int](pool, "somekey", () => FinalOutcome(5))
     val cell = completer.cell
     cell.onComplete {
       case Success(v) =>
@@ -31,7 +31,7 @@ class BaseSuite extends FunSuite {
         assert(false)
         latch.countDown()
     }
-    pool.awaitResult(cell)
+    pool.triggerExecution(cell)
 
     latch.await()
 
@@ -113,7 +113,7 @@ class BaseSuite extends FunSuite {
     }
 
     completer2.putFinal(10)
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
 
     latch.await()
 
@@ -142,7 +142,7 @@ class BaseSuite extends FunSuite {
     }
 
     completer2.putFinal(10)
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
 
     latch.await()
 
@@ -162,7 +162,7 @@ class BaseSuite extends FunSuite {
       else NoOutcome)
 
     completer2.putFinal(9)
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
     cell1.waitUntilNoDeps()
 
     assert(cell1.numDependencies == 0)
@@ -180,7 +180,7 @@ class BaseSuite extends FunSuite {
       if (imm == Mutable) FinalOutcome(Mutable)
       else NoOutcome)
 
-    pool.awaitResult(completer1.cell)
+    pool.triggerExecution(completer1.cell)
 
     completer1.putFinal(Immutable)
     assert(completer2.cell.numCompleteCallbacks == 0)
@@ -210,7 +210,7 @@ class BaseSuite extends FunSuite {
     })
 
     completer.putNext(9)
-    pool.awaitResult(cell)
+    pool.triggerExecution(cell)
 
     latch.await()
 
@@ -240,7 +240,7 @@ class BaseSuite extends FunSuite {
     }
 
     completer2.putNext(10)
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
     latch.await()
 
     assert(cell1.numDependencies == 1)
@@ -270,7 +270,7 @@ class BaseSuite extends FunSuite {
         latch.countDown()
     }
 
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
     completer2.putNext(9)
     completer1.putNext(8)
 
@@ -313,7 +313,7 @@ class BaseSuite extends FunSuite {
       case (Failure(e), _) =>
         assert(false)
     }
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
     completer2.putFinal(10)
     latch.await()
 
@@ -347,7 +347,7 @@ class BaseSuite extends FunSuite {
     }
 
     completer2.putFinal(10)
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
 
     latch.await()
 
@@ -367,7 +367,7 @@ class BaseSuite extends FunSuite {
     })
 
     completer2.putFinal(10)
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
 
     cell1.waitUntilNoDeps()
 
@@ -387,7 +387,7 @@ class BaseSuite extends FunSuite {
       case _ => NoOutcome
     })
 
-    pool.awaitResult(completer1.cell)
+    pool.triggerExecution(completer1.cell)
 
     completer1.putFinal(Immutable)
     assert(completer2.cell.numNextCallbacks == 0)
@@ -404,10 +404,10 @@ class BaseSuite extends FunSuite {
     val latch = new CountDownLatch(10000)
     var completer1:  CellCompleter[ImmutabilityKey.type, Immutability] = null
     var completer2:  CellCompleter[ImmutabilityKey.type, Immutability] = null
-    completer1 = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey, cell => {
+    completer1 = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey, () => {
        NoOutcome
     })
-    completer2 = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey, _ => NoOutcome)
+    completer2 = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey, () => NoOutcome)
 
     for (i <- 1 to 10000) {
       pool.execute(() => {
@@ -418,7 +418,7 @@ class BaseSuite extends FunSuite {
         latch.countDown()
       })
     }
-    pool.awaitResult(completer1.cell)
+    pool.triggerExecution(completer1.cell)
 
     latch.await()
 
@@ -440,7 +440,7 @@ class BaseSuite extends FunSuite {
 
       assert(completer1.cell.numDependencies == 1)
 
-      pool.awaitResult(completer1.cell)
+      pool.triggerExecution(completer1.cell)
 
       pool.execute(() => completer2.putNext(ConditionallyImmutable))
       pool.execute(() => completer2.putFinal(Mutable))
@@ -477,7 +477,7 @@ class BaseSuite extends FunSuite {
         latch.countDown()
     }
 
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
     // This will complete `cell1`, if it is awaited
     completer2.putNext(10)
 
@@ -518,7 +518,7 @@ class BaseSuite extends FunSuite {
     }
 
     completer2.putNext(9)
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
     completer2.putNext(10)
 
     latch.await()
@@ -563,7 +563,7 @@ class BaseSuite extends FunSuite {
         latch2.countDown()
     }
 
-    pool.awaitResult(cell1)
+    pool.triggerExecution(cell1)
 
     completer1.putNext(8)
     latch1.await()
@@ -591,7 +591,7 @@ class BaseSuite extends FunSuite {
         latch.countDown()
     }
     completer.put(6, true)
-    pool.awaitResult(completer.cell)
+    pool.triggerExecution(completer.cell)
 
     latch.await()
     pool.shutdown()
@@ -611,7 +611,7 @@ class BaseSuite extends FunSuite {
         latch.countDown()
     }
     completer.put(10, false)
-    pool.awaitResult(completer.cell)
+    pool.triggerExecution(completer.cell)
 
     latch.await()
     pool.shutdown()
@@ -639,7 +639,7 @@ class BaseSuite extends FunSuite {
     }
     completer.putNext(Set(3, 5))
     completer.putFinal(Set(4))
-    pool.awaitResult(cell)
+    pool.triggerExecution(cell)
 
     latch.await()
     pool.shutdown()
@@ -666,7 +666,7 @@ class BaseSuite extends FunSuite {
         assert(false)
         latch.countDown()
     }
-    pool.awaitResult(cell)
+    pool.triggerExecution(cell)
     completer.putNext(Set(4))
 
     latch.await()
@@ -795,30 +795,31 @@ class BaseSuite extends FunSuite {
   }
 
   test("purity analysis with Demo.java: impure methods") {
-      val file = new File("core")
-      val lib = Project(file)
+    val file = new File("core")
+    val lib = Project(file)
 
-      val report = PurityAnalysis.doAnalyze(lib, List.empty, () => false).toConsoleString.split("\n")
-      val impureMethods = List(
-        "public static int impure(int)",
-        "static int npfoo(int)",
-        "static int npbar(int)",
-        "static int mm1(int)",
-        "static int mm2(int)",
-        "static int mm3(int)",
-        "static int m1np(int)",
-        "static int m2np(int)",
-        "static int m3np(int)",
-        "static int cpure(int)",
-        "static int cpureCallee(int)",
-        "static int cpureCalleeCallee1(int)",
-        "static int cpureCalleeCallee2(int)",
-        "static int cpureCalleeCalleeCallee(int)",
-        "static int cpureCalleeCalleeCalleeCallee(int)")
+    val report = PurityAnalysis.doAnalyze(lib, List.empty, () => false).toConsoleString.split("\n")
 
-      val finalRes = impureMethods.filter(report.contains(_))
+    val impureMethods = List(
+      "public static int impure(int)",
+      "static int npfoo(int)",
+      "static int npbar(int)",
+      "static int mm1(int)",
+      "static int mm2(int)",
+      "static int mm3(int)",
+      "static int m1np(int)",
+      "static int m2np(int)",
+      "static int m3np(int)",
+      "static int cpure(int)",
+      "static int cpureCallee(int)",
+      "static int cpureCalleeCallee1(int)",
+      "static int cpureCalleeCallee2(int)",
+      "static int cpureCalleeCalleeCallee(int)",
+      "static int cpureCalleeCalleeCalleeCallee(int)")
 
-      assert(finalRes.size == 0)
+    val finalRes = impureMethods.filter(report.contains(_))
+
+    assert(finalRes.size == 0)
   }
 
   test("PurityLattice: successful joins") {
