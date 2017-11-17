@@ -313,35 +313,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * @param cell The awaited cell.
     * @return Returns the (future) final value of the cell.
     */
-  def awaitResult[K <: Key[V], V](cell: Cell[K, V]): Future[V] = {
-    if (!cellsNotDone.get().contains(cell))
-      throw new IllegalStateException("Cell has not been registered in this pool.")
-
-    val p = Promise[V]
-
+  private[cell] def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     registerForAwait(cell)
-
-    cell.onComplete {
-      // If the result is already available, this will be executed immediately.
-      case Success(v) => p.success(v)
-      case _ => p.failure(null)
-    }
-    /*
-      XXX If `oncomplete` and `onnext` get merged,
-      replace this call of `oncomplete` by the more efficient
-      version:
-
-          cell.onNext ((t, isFinal) => {
-          if(isFinal)
-            t match {
-              case (Success(v)) =>
-                // If the result is already available, this will be executed immediately.
-                p.success(v)
-              case _ =>
-                p.failure(null)
-            }
-          })
-     */
 
     if (!cell.isComplete)
       execute(() => {
@@ -352,12 +325,11 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             completer.putFinal(v)
           case NextOutcome(v) =>
             completer.putNext(v)
-            completer.cellDependencies.foreach(awaitResult)
+            completer.cellDependencies.foreach(triggerExecution)
           case NoOutcome =>
-            completer.cellDependencies.foreach(awaitResult)
+            completer.cellDependencies.foreach(triggerExecution)
         }
       })
-    p.future
   }
 
   /** Returns true iff the cell is waited for. */
