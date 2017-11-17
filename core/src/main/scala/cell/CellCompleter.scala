@@ -7,7 +7,7 @@ import lattice.{ Lattice, Key, DefaultKey }
 /**
  * Interface trait for programmatically completing a cell. Analogous to `Promise[V]`.
  */
-private[cell] trait CellCompleter[K <: Key[V], V] {
+trait CellCompleter[K <: Key[V], V] {
 
   /**
    * The cell associated with this completer.
