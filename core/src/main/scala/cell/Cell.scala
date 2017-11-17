@@ -278,6 +278,7 @@ class CellImpl[K <: Key[V], V](
           if (state.compareAndSet(current, newState)) {
             success = true
             other.addNextCallback(newDep, this)
+            pool.triggerExecution(other)
           }
       }
     }
