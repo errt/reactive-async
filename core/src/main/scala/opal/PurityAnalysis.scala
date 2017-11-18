@@ -61,8 +61,8 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       method <- classFile.methods
     } {
       val cell = pool.createCell[PurityKey.type, Purity](PurityKey, () => {
-        //analyzeWhenNext(project, methodToCell, classFile, method)
-        NoOutcome
+        analyzeWhenNext(project, methodToCell, classFile, method)
+        //NoOutcome
       })
       methodToCell = methodToCell + ((method, cell))
     }

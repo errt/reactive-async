@@ -276,15 +276,19 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * all associated tasks.
     *
     * @param cell The awaited cell.
+    * @return Returns false, iff the cell has already been awaited.
     */
-  private def registerForAwait[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+  private def registerForAwait[K <: Key[V], V](cell: Cell[K, V]): Boolean = {
     var success = false
+    var wasAwaited = false
     while (!success) {
       val registered = cellsAwaited.get()
+      wasAwaited = registered.contains(cell)
       val newRegistered = registered + (cell -> cell)
       success = cellsAwaited.compareAndSet(registered, newRegistered)
     }
     runScheduledTasks(cell)
+    !wasAwaited
   }
 
   /** Run all scheduled tasks that have been associated to a cell.
@@ -314,9 +318,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * @return Returns the (future) final value of the cell.
     */
   private[cell] def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
-    registerForAwait(cell)
-
-    if (!cell.isComplete)
+    if (registerForAwait(cell) && !cell.isComplete)
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
         val outcome = completer.init()
