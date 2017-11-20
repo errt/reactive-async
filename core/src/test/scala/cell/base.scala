@@ -10,11 +10,6 @@ import scala.concurrent.duration._
 
 import lattice.{ Lattice, StringIntLattice, LatticeViolationException, StringIntKey }
 
-import org.opalj.fpcf.analyses.FieldMutabilityAnalysis
-import org.opalj.fpcf.properties.FieldMutability
-import org.opalj.fpcf.FPCFAnalysesManager
-import org.opalj.fpcf.FPCFAnalysis
-import org.opalj.fpcf.FPCFAnalysesManagerKey
 import opal._
 import org.opalj.br.analyses.Project
 import java.io.File
@@ -891,6 +886,62 @@ class BaseSuite extends FunSuite {
     }
 
     pool.shutdown()
+  }
+
+  test("whenNext and whenComplete: same depender") {
+    val latch1 = new CountDownLatch(1)
+
+    val pool = new HandlerPool
+    val completer1 = CellCompleter[StringIntKey, Int](pool, "c1")
+    val completer2 = CellCompleter[StringIntKey, Int](pool, "c2")
+
+    completer2.cell.whenNext(completer1.cell, (v) => {
+      assert(false)
+      FinalOutcome(10)
+    })
+    completer2.cell.whenComplete(completer1.cell, (v) => {
+      FinalOutcome(10)
+    })
+
+    completer2.cell.onComplete(v => latch1.countDown())
+
+    completer1.putFinal(10)
+
+    latch1.await()
+
+    pool.shutdown()
+
+    assert(completer1.cell.getResult() == 10)
+    assert(completer2.cell.getResult() == 10)
+  }
+
+  test("whenNext and whenComplete: different depender") {
+    val latch1 = new CountDownLatch(2)
+
+    val pool = new HandlerPool
+    val completer1 = CellCompleter[StringIntKey, Int](pool, "c1")
+    val completer2 = CellCompleter[StringIntKey, Int](pool, "c2")
+    val completer3 = CellCompleter[StringIntKey, Int](pool, "c3")
+
+    completer2.cell.whenNext(completer1.cell, (v) => {
+      FinalOutcome(10)
+    })
+    completer3.cell.whenComplete(completer1.cell, (v) => {
+      FinalOutcome(10)
+    })
+
+    completer2.cell.onComplete(v => latch1.countDown())
+    completer2.cell.onComplete(v => latch1.countDown())
+
+    completer1.putFinal(10)
+
+    latch1.await()
+
+    pool.shutdown()
+
+    assert(completer1.cell.getResult() == 10)
+    assert(completer2.cell.getResult() == 10)
+    assert(completer3.cell.getResult() == 10)
   }
 
   test("putNext and putFinal: concurrency test") {

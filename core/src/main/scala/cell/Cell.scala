@@ -689,7 +689,6 @@ private class NextDepRunnable[K <: Key[V], V](
         }
       case Failure(e) => /* do nothing */
     }
-
     if (cell.isComplete) completer.removeNextDep(cell)
   }
 
