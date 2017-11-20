@@ -3,8 +3,6 @@ package cell
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicReference
 
-import immutability.V
-
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.Await
@@ -12,8 +10,6 @@ import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 import lattice.{DefaultKey, Key, Lattice}
 import org.opalj.graphs._
-
-import scala.util.Success
 
 /* Need to have reference equality for CAS.
  */
@@ -50,7 +46,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * @tparam V The type of the values.
     * @return Returns a cell.
     */
-  def createCell[K <: Key[V], V](key: K, init: () => WhenNextOutcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
+  def createCell[K <: Key[V], V](key: K, init: () => Outcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
     CellCompleter(this, key, init)(lattice).cell
   }
 
@@ -83,11 +79,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     *
     * @param cell Cell to which the task is associated.
     * @param task Task to run when `cell` get awaited.
-    * @tparam K Type of the Key.
-    * @tparam V Type of the values.
     */
   @tailrec
-  final protected[cell] def schedule[K <: Key[V], V](cell: Cell[K, V], task: Runnable): Unit = {
+  final private[cell] def schedule[K <: Key[V], V](cell: Cell[K, V], task: Runnable): Unit = {
     // TODO Could `task` be of more specific type e.g. NextDepRunnable or NextCallbackRunnable?
     // TODO Is this safe? What if a cell gets awaited right before the task is added?
     if (cellsAwaited.get().contains(cell)) execute(task)
@@ -223,10 +217,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   //def execute(f : => Unit) : Unit =
   //  execute(new Runnable{def run() : Unit = f})
 
-  protected[cell] def execute(fun: () => Unit): Unit =
+  private[cell] def execute(fun: () => Unit): Unit =
     execute(new Runnable { def run(): Unit = fun() })
 
-  protected[cell] def execute(task: Runnable): Unit = {
+  private[cell] def execute(task: Runnable): Unit = {
     // Submit task to the pool
     var submitSuccess = false
     while (!submitSuccess) {
@@ -312,10 +306,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * If a cell becomes awaited, it's `init` method is
     * run to both get an initial (or possibly final) value
     * and to set up dependencies. All dependees automatically
-    * become awaited.
+    * get triggered.
     *
-    * @param cell The awaited cell.
-    * @return Returns the (future) final value of the cell.
+    * @param cell The cell that is triggered.
     */
   private[cell] def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     if (registerForAwait(cell) && !cell.isComplete)

@@ -22,6 +22,7 @@ trait CellCompleter[K <: Key[V], V] {
   def tryComplete(value: Try[V]): Boolean
 
   private[cell] def removeDep(cell: Cell[K, V]): Unit
+  private[cell] def removeNextDep(cell: Cell[K, V]): Unit
 }
 
 object CellCompleter {
@@ -30,7 +31,7 @@ object CellCompleter {
    * Create a completer for a cell holding values of type `V`
    * given a `HandlerPool` and a `Key[V]`.
    */
-  def apply[K <: Key[V], V](pool: HandlerPool, key: K, init: () => WhenNextOutcome[V] = () => NoOutcome)(implicit lattice: Lattice[V]): CellCompleter[K, V] = {
+  def apply[K <: Key[V], V](pool: HandlerPool, key: K, init: () => Outcome[V] = () => NoOutcome)(implicit lattice: Lattice[V]): CellCompleter[K, V] = {
     val impl = new CellImpl[K, V](pool, key, lattice, init)
     pool.register(impl)
     impl

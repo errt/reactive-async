@@ -5,7 +5,7 @@ import java.util.concurrent.{ CountDownLatch, ExecutionException }
 
 import scala.annotation.tailrec
 
-import scala.concurrent.{ ExecutionContext, OnCompleteRunnable }
+import scala.concurrent.OnCompleteRunnable
 import scala.util.control.NonFatal
 import scala.util.{ Failure, Success, Try }
 
@@ -149,7 +149,7 @@ private object State {
     new State[K, V](lattice.empty, Map(), Map(), Map(), Map())
 }
 
-class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: Lattice[V]) extends Cell[K, V] with CellCompleter[K, V] {
+class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: Lattice[V], val init: () => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
 
   private val nodepslatch = new CountDownLatch(1)
   private val nonextdepslatch = new CountDownLatch(1)
