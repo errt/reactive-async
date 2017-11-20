@@ -24,13 +24,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
-  private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
-
-  private val cellsAwaited = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
-
-  /** Whenever a cell gets awaited, run the mapped runnables for that cell. */
-  // Maybe this could be merged with cellsNotDone or cellsAwaited?
-  private val tasksScheduled = new AtomicReference[Map[Cell[_, _], Seq[Runnable]]](Map())
+  // Cells that have not been completed, mapped to a boolean to indicate, if the computation has already been started.
+  private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Boolean]](Map())
 
   /** Returns a new cell in this HandlerPool.
     *
@@ -42,8 +37,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * @param key The key to resolve this cell if in a cycle or insufficient input.
     * @param init A callback to return the initial value for this cell and to set up dependencies.
     * @param lattice The lattice of which the values of this cell are taken from.
-    * @tparam K The type of the Key.
-    * @tparam V The type of the values.
     * @return Returns a cell.
     */
   def createCell[K <: Key[V], V](key: K, init: () => Outcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
@@ -55,7 +48,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * Creates a new, completed cell with value `v`.
     *
     * @param lattice The lattice of which the values of this cell are taken from.
-    * @tparam V The type of the values.
     * @return Returns a cell with value `v`.
     */
   def createCompletedCell[V](result: V)(implicit lattice: Lattice[V]): Cell[DefaultKey[V], V] = {
@@ -75,43 +67,20 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     }
   }
 
-  /** Associate a task with a cell and schedule it for later execution.
-    *
-    * @param cell Cell to which the task is associated.
-    * @param task Task to run when `cell` get awaited.
-    */
-  @tailrec
-  final private[cell] def schedule[K <: Key[V], V](cell: Cell[K, V], task: Runnable): Unit = {
-    // TODO Could `task` be of more specific type e.g. NextDepRunnable or NextCallbackRunnable?
-    // TODO Is this safe? What if a cell gets awaited right before the task is added?
-    if (cellsAwaited.get().contains(cell)) execute(task)
-    else {
-      val oldTasks = tasksScheduled.get()
-      val tasksForCell = oldTasks.getOrElse(cell, Seq()) ++ Seq(task) // Is the second Seq() needed? I guess not!
-      val newTasks = oldTasks + (cell -> tasksForCell)
-      if (!tasksScheduled.compareAndSet(oldTasks, newTasks)) {
-        schedule(cell, task)
-      }
-    }
-  }
 
   /** Register a cell at this HandlerPool.
     *
     * @param cell The cell.
-    * @tparam K Type of the cell's key.
-    * @tparam V Type of the cell's value.
     */
   private[cell] def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     val registered = cellsNotDone.get()
-    val newRegistered = registered + (cell -> cell)
+    val newRegistered = registered + (cell -> false)
     cellsNotDone.compareAndSet(registered, newRegistered)
   }
 
   /** Deregister a cell at this HandlerPool.
     *
     * @param cell The cell.
-    * @tparam K Type of the cell's key.
-    * @tparam V Type of the cell's value.
     */
   private[cell] def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     var success = false
@@ -127,7 +96,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[List[Cell[_, _]]]
     this.onQuiescent { () =>
       val registered = this.cellsNotDone.get()
-      p.success(registered.values.toList)
+      p.success(registered.keys.toList)
     }
     p.future
   }
@@ -150,7 +119,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       println(registered.size)
       if (registered.nonEmpty) {
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.cellDependencies)
@@ -178,13 +147,13 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (registered.nonEmpty) {
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.cellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
       }
       // Finds the rest of the unresolved cells
-      val rest = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -270,40 +239,21 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * all associated tasks.
     *
     * @param cell The awaited cell.
-    * @return Returns false, iff the cell has already been awaited.
+    * @return Returns false, iff the cell had already been triggered.
     */
-  private def registerForAwait[K <: Key[V], V](cell: Cell[K, V]): Boolean = {
+  private def markAsTriggered[K <: Key[V], V](cell: Cell[K, V]): Boolean = {
     var success = false
-    var wasAwaited = false
+    var wasTriggered = false
     while (!success) {
-      val registered = cellsAwaited.get()
-      wasAwaited = registered.contains(cell)
-      val newRegistered = registered + (cell -> cell)
-      success = cellsAwaited.compareAndSet(registered, newRegistered)
+      val registered = cellsNotDone.get()
+      wasTriggered = registered.getOrElse(cell, false)
+      val newRegistered = registered + (cell -> true)
+      success = cellsNotDone.compareAndSet(registered, newRegistered)
     }
-    runScheduledTasks(cell)
-    !wasAwaited
+    !wasTriggered
   }
 
-  /** Run all scheduled tasks that have been associated to a cell.
-    * These tasks are removed from the schedule.
-    *
-    * @param cell The awaited cell.
-    */
-  private def runScheduledTasks[K <: Key[V], V](cell: Cell[K, V]): Unit = {
-    val oldScheduled = tasksScheduled.get()
-    val scheduledForCell = oldScheduled.getOrElse(cell, Seq())
-    val newScheduled = oldScheduled.filterKeys(_ ne cell)
-    if (!tasksScheduled.compareAndSet(oldScheduled, newScheduled)) {
-      runScheduledTasks(cell)
-    } else {
-      scheduledForCell.foreach(execute)
-    }
-  }
-
-  /** Eventually returns the final result of a cell.
-    *
-    * If a cell becomes awaited, it's `init` method is
+  /** If a cell is triggered, it's `init` method is
     * run to both get an initial (or possibly final) value
     * and to set up dependencies. All dependees automatically
     * get triggered.
@@ -311,7 +261,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * @param cell The cell that is triggered.
     */
   private[cell] def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
-    if (registerForAwait(cell) && !cell.isComplete)
+    if (markAsTriggered(cell) && !cell.isComplete)
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
         val outcome = completer.init()
@@ -326,9 +276,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         }
       })
   }
-
-  /** Returns true iff the cell is waited for. */
-  def isAwaited[K <: Key[V], V](cell: Cell[K, V]): Boolean = cellsAwaited.get().contains(cell)
 
   /** Possibly initiates an orderly shutdown in which previously
     * submitted tasks are executed, but no new tasks will be accepted.
