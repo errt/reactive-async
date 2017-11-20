@@ -3,10 +3,10 @@ package opal
 import java.net.URL
 
 import scala.collection.JavaConverters._
+
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import cell._
-import lattice.Key
 import org.opalj.Success
 import org.opalj.br.{ ClassFile, Method, MethodWithBody, PC }
 import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project }
@@ -51,6 +51,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     project: Project[URL],
     parameters: Seq[String] = List.empty,
     isInterrupted: () ⇒ Boolean): BasicReport = {
+
     val startTime = System.currentTimeMillis // Used for measuring execution time
     // 1. Initialization of key data structures (one cell(completer) per method)
     val pool = new HandlerPool()
@@ -77,7 +78,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 //      pool.execute(() => analyze(project, methodToCell, classFile, method))
 //      pool.triggerExecution(methodToCell(method))
       pool.createCell[PurityKey.type, Purity](PurityKey, () => NoOutcome)
-        .whenNext(methodToCell(method), (_, _) => NoOutcome)
+        .whenNext(methodToCell(method), _ => NoOutcome)
     }
     val fut = pool.quiescentResolveCell
     Await.ready(fut, 30.minutes)
@@ -109,7 +110,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       project: Project[URL],
       methodToCell: Map[Method, Cell[PurityKey.type, Purity]],
       classFile: ClassFile,
-      method: Method): WhenNextOutcome[Purity] = {
+      method: Method): Outcome[Purity] = {
     import project.nonVirtualCall
 
     val cellCompleter = methodToCell(method)
@@ -166,7 +167,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 
                 val targetCell = methodToCell(callee)
                 hasDependencies = true
-                cellCompleter.whenNext(targetCell, (p: Purity, isFinal: Boolean) => if (isFinal && p == Impure) FinalOutcome(Impure) else NoOutcome)
+                cellCompleter.whenNext(targetCell, p => if ( /* TODO Use whenComplete?*/p == Impure) FinalOutcome(Impure) else NoOutcome)
 
               case _ /* Empty or Failure */ ⇒
 
@@ -276,7 +277,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 
                 val targetCellCompleter = methodToCellCompleter(callee)
                 hasDependencies = true
-                cellCompleter.cell.whenNext(targetCellCompleter.cell, (p: Purity, isFinal: Boolean) => if (isFinal && p == Impure) FinalOutcome(Impure) else NoOutcome)
+                cellCompleter.cell.whenComplete(targetCellCompleter.cell, p => if (p == Impure) FinalOutcome(Impure) else NoOutcome)
 
               case _ /* Empty or Failure */ ⇒
 
