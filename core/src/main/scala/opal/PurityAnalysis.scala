@@ -62,8 +62,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       method <- classFile.methods
     } {
       val cell = pool.createCell[PurityKey.type, Purity](PurityKey, () => {
-        analyzeWhenNext(project, methodToCell, classFile, method)
-        //NoOutcome
+        analyze(project, methodToCell, classFile, method)
       })
       methodToCell = methodToCell + ((method, cell))
     }
@@ -75,8 +74,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       classFile <- project.allProjectClassFiles.par
       method <- classFile.methods
     } {
-//      pool.execute(() => analyze(project, methodToCell, classFile, method))
-//      pool.triggerExecution(methodToCell(method))
+      // pool.triggerExecution(methodToCell(method)) is not visible, but we can create a helper cell that triggers
       pool.createCell[PurityKey.type, Purity](PurityKey, () => NoOutcome)
         .whenNext(methodToCell(method), _ => NoOutcome)
     }
@@ -106,7 +104,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
   /**
    * Determines the purity of the given method.
    */
-  def analyzeWhenNext(
+  def analyze(
       project: Project[URL],
       methodToCell: Map[Method, Cell[PurityKey.type, Purity]],
       classFile: ClassFile,
@@ -209,114 +207,4 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       NextOutcome(UnknownPurity) // == NoOutcome
     }
   }
-
-  /**
-   * Determines the purity of the given method.
-   */
-  /*def analyze(
-    project: Project[URL],
-    methodToCellCompleter: Map[Method, CellCompleter[PurityKey.type, Purity]],
-    classFile: ClassFile,
-    method: Method): Unit = {
-
-    import project.nonVirtualCall
-
-    val cellCompleter = methodToCellCompleter(method)
-
-    if ( // Due to a lack of knowledge, we classify all native methods or methods that
-    // belong to a library (and hence lack the body) as impure...
-    method.body.isEmpty /*HERE: method.isNative || "isLibraryMethod(method)"*/ ||
-      // for simplicity we are just focusing on methods that do not take objects as parameters
-      method.parameterTypes.exists(!_.isBaseType)) {
-      cellCompleter.putFinal(Impure)
-      return ;
-    }
-
-    var hasDependencies = false
-    val declaringClassType = classFile.thisType
-    val methodDescriptor = method.descriptor
-    val methodName = method.name
-    val body = method.body.get
-    val instructions = body.instructions
-    val maxPC = instructions.size
-
-    var currentPC = 0
-    while (currentPC < maxPC) {
-      val instruction = instructions(currentPC)
-
-      (instruction.opcode: @scala.annotation.switch) match {
-        case GETSTATIC.opcode ⇒
-          val GETSTATIC(declaringClass, fieldName, fieldType) = instruction
-          import project.resolveFieldReference
-          resolveFieldReference(declaringClass, fieldName, fieldType) match {
-
-            case Some(field) if field.isFinal ⇒
-            /* Nothing to do; constants do not impede purity! */
-
-            // case Some(field) if field.isPrivate /*&& field.isNonFinal*/ ⇒
-            // check if the field is effectively final
-
-            case _ ⇒
-              cellCompleter.putFinal(Impure)
-              return ;
-          }
-
-        case INVOKESPECIAL.opcode | INVOKESTATIC.opcode ⇒ instruction match {
-
-          case MethodInvocationInstruction(`declaringClassType`, _, `methodName`, `methodDescriptor`) ⇒
-          // We have a self-recursive call; such calls do not influence
-          // the computation of the method's purity and are ignored.
-          // Let's continue with the evaluation of the next instruction.
-
-          case mii: NonVirtualMethodInvocationInstruction ⇒
-
-            nonVirtualCall(mii) match {
-
-              case Success(callee) ⇒
-                /* Recall that self-recursive calls are handled earlier! */
-
-                val targetCellCompleter = methodToCellCompleter(callee)
-                hasDependencies = true
-                cellCompleter.cell.whenComplete(targetCellCompleter.cell, p => if (p == Impure) FinalOutcome(Impure) else NoOutcome)
-
-              case _ /* Empty or Failure */ ⇒
-
-                // We know nothing about the target method (it is not
-                // found in the scope of the current project).
-                cellCompleter.putFinal(Impure)
-                return ;
-            }
-
-        }
-
-        case NEW.opcode |
-          GETFIELD.opcode |
-          PUTFIELD.opcode | PUTSTATIC.opcode |
-          NEWARRAY.opcode | MULTIANEWARRAY.opcode | ANEWARRAY.opcode |
-          AALOAD.opcode | AASTORE.opcode |
-          BALOAD.opcode | BASTORE.opcode |
-          CALOAD.opcode | CASTORE.opcode |
-          SALOAD.opcode | SASTORE.opcode |
-          IALOAD.opcode | IASTORE.opcode |
-          LALOAD.opcode | LASTORE.opcode |
-          DALOAD.opcode | DASTORE.opcode |
-          FALOAD.opcode | FASTORE.opcode |
-          ARRAYLENGTH.opcode |
-          MONITORENTER.opcode | MONITOREXIT.opcode |
-          INVOKEDYNAMIC.opcode | INVOKEVIRTUAL.opcode | INVOKEINTERFACE.opcode ⇒
-          cellCompleter.putFinal(Impure)
-          return ;
-
-        case _ ⇒
-        /* All other instructions (IFs, Load/Stores, Arith., etc.) are pure. */
-      }
-      currentPC = body.pcOfNextInstruction(currentPC)
-    }
-
-    // Every method that is not identified as being impure is (conditionally)pure.
-    if (!hasDependencies) {
-      cellCompleter.putFinal(Pure)
-      //println("Immediately Pure Method: "+method.toJava(classFile))
-    }
-  }*/
 }
