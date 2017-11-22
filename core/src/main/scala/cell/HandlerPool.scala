@@ -24,8 +24,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
-  // Cells that have not been completed, mapped to a boolean to indicate, if the computation has already been started.
-  private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Boolean]](Map())
+  // Cells that have not been completed
+  private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
 
   /** Returns a new cell in this HandlerPool.
     *
@@ -74,7 +74,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     */
   private[cell] def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     val registered = cellsNotDone.get()
-    val newRegistered = registered + (cell -> false)
+    val newRegistered = registered + (cell -> cell)
     cellsNotDone.compareAndSet(registered, newRegistered)
   }
 
@@ -96,7 +96,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[List[Cell[_, _]]]
     this.onQuiescent { () =>
       val registered = this.cellsNotDone.get()
-      p.success(registered.keys.toList)
+      p.success(registered.values.toList)
     }
     p.future
   }
@@ -119,7 +119,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       println(registered.size)
       if (registered.nonEmpty) {
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
@@ -134,7 +134,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().filter(_._2).keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().values.filter(_.isRunning).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -147,13 +147,13 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (registered.nonEmpty) {
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
       }
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().filter(_._2).keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().values.filter(_.isRunning).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -235,23 +235,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     })
   }
 
-  /** Mark a cell as being awaited and run
-    * all associated tasks.
-    *
-    * @param cell The awaited cell.
-    * @return Returns false, iff the cell had already been triggered.
-    */
-  private def markAsTriggered[K <: Key[V], V](cell: Cell[K, V]): Boolean = {
-    var success = false
-    var wasTriggered = false
-    while (!success) {
-      val registered = cellsNotDone.get()
-      wasTriggered = registered.getOrElse(cell, false)
-      val newRegistered = registered + (cell -> true)
-      success = cellsNotDone.compareAndSet(registered, newRegistered)
-    }
-    !wasTriggered
-  }
 
   /** If a cell is triggered, it's `init` method is
     * run to both get an initial (or possibly final) value
@@ -261,7 +244,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     * @param cell The cell that is triggered.
     */
   def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
-    if (markAsTriggered(cell) && !cell.isComplete)
+    if (cell.markAsRunning())
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
         val outcome = completer.init()
