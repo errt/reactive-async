@@ -5,7 +5,7 @@ import java.util.concurrent.CountDownLatch
 import lattice.{DefaultKey, Lattice, StringIntKey, StringIntLattice}
 import org.scalatest.FunSuite
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 class OnDemand extends FunSuite {
@@ -253,6 +253,57 @@ class OnDemand extends FunSuite {
 
     assert(cell3.isComplete)
     assert(cell3.getResult() === 10)
+
+    pool.shutdown()
+  }
+
+  test("cycle does not get resolved, if not triggered") {
+    val pool = new HandlerPool()
+    var cell1: Cell[StringIntKey, Int] = null
+    var cell2: Cell[StringIntKey, Int] = null
+    cell1 = pool.createCell[StringIntKey, Int]("cell1", () => {
+      cell1.whenNext(cell2, _ => FinalOutcome(-2))
+      FinalOutcome(-1)
+    })
+    cell2 = pool.createCell[StringIntKey, Int]("cell1", () => {
+      cell2.whenNext(cell1, _ => FinalOutcome(-2))
+      FinalOutcome(-1)
+    })
+
+    val fut2 = pool.quiescentResolveCell
+    Await.ready(fut2, 2.seconds)
+
+    assert(cell1.getResult() == 0)
+    assert(!cell1.isComplete)
+    assert(cell2.getResult() == 0)
+    assert(!cell2.isComplete)
+
+    pool.shutdown()
+  }
+
+  test("cell does not get resolved, if not triggered") {
+    val pool = new HandlerPool()
+    val cell = pool.createCell[StringIntKey, Int]("cell1", () => FinalOutcome(-1))
+
+    val fut2 = pool.quiescentResolveCell
+    Await.ready(fut2, 2.seconds)
+
+    assert(cell.getResult() == 0)
+    assert(!cell.isComplete)
+
+    pool.shutdown()
+  }
+
+  test("cell gets resolved, if triggered") {
+    val pool = new HandlerPool()
+    val cell = pool.createCell[StringIntKey, Int]("cell1", () => NextOutcome(-1))
+    pool.triggerExecution(cell)
+
+    val fut2 = pool.quiescentResolveCell
+    Await.ready(fut2, 2.seconds)
+
+    assert(cell.getResult() == 1)
+    assert(cell.isComplete)
 
     pool.shutdown()
   }

@@ -133,8 +133,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   def quiescentResolveDefaults[K <: Key[V], V]: Future[Boolean] = {
     val p = Promise[Boolean]
     this.onQuiescent { () =>
-      // Finds the rest of the unresolved cells
-      val rest = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      // Finds the rest of the unresolved cells (that have been triggered)
+      val rest = this.cellsNotDone.get().filter(_._2).keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -152,8 +152,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
       }
-      // Finds the rest of the unresolved cells
-      val rest = this.cellsNotDone.get().keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      // Finds the rest of the unresolved cells (that have been triggered)
+      val rest = this.cellsNotDone.get().filter(_._2).keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -260,7 +260,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     *
     * @param cell The cell that is triggered.
     */
-  private[cell] def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+  def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     if (markAsTriggered(cell) && !cell.isComplete)
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
