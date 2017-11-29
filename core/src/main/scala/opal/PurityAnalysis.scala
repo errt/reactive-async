@@ -74,8 +74,8 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       method <- classFile.methods
     } {
       pool.triggerExecution(methodToCell(method)) //is not visible, but we can create a helper cell that triggers
-//      pool.createCell[PurityKey.type, Purity](PurityKey, () => NoOutcome)
-//        .whenNext(methodToCell(method), _ => NoOutcome)
+      //      pool.createCell[PurityKey.type, Purity](PurityKey, () => NoOutcome)
+      //        .whenNext(methodToCell(method), _ => NoOutcome)
     }
     val fut = pool.quiescentResolveCell
     Await.ready(fut, 30.minutes)
@@ -104,10 +104,10 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
    * Determines the purity of the given method.
    */
   def analyze(
-      project: Project[URL],
-      methodToCell: Map[Method, Cell[PurityKey.type, Purity]],
-      classFile: ClassFile,
-      method: Method): Outcome[Purity] = {
+    project: Project[URL],
+    methodToCell: Map[Method, Cell[PurityKey.type, Purity]],
+    classFile: ClassFile,
+    method: Method): Outcome[Purity] = {
     import project.nonVirtualCall
 
     val cell = methodToCell(method)

@@ -1,3 +1,5 @@
+package cell
+
 import org.scalatest.FunSuite
 
 import scala.concurrent.{ Promise, Await }

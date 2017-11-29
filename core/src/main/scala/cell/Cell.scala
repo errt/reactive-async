@@ -551,10 +551,11 @@ class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: Lattice[V
     }
   }
 
-  /** Mark this cell as "running".
-    *
-    * @return Returns true, iff the cell's status changed (i.e. it had not been running before).
-    */
+  /**
+   * Mark this cell as "running".
+   *
+   * @return Returns true, iff the cell's status changed (i.e. it had not been running before).
+   */
   @tailrec
   override private[cell] final def markAsRunning(): Boolean = {
     state.get() match {

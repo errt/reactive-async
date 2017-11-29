@@ -7,8 +7,8 @@ import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.{Future, Promise}
-import lattice.{DefaultKey, Key, Lattice}
+import scala.concurrent.{ Future, Promise }
+import lattice.{ DefaultKey, Key, Lattice }
 import org.opalj.graphs._
 
 /* Need to have reference equality for CAS.
@@ -26,29 +26,31 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
 
-  /** Returns a new cell in this HandlerPool.
-    *
-    * Creates a new cell with the given key. The `init` method is used to
-    * retrieve an initial value for that cell and to set up dependencies via `whenNext`.
-    * It gets called, when the cell is awaited, either directly by the awaitResult method
-    * of the HandlerPool or if a cell that depends on this cell is awaited.
-    *
-    * @param key The key to resolve this cell if in a cycle or insufficient input.
-    * @param init A callback to return the initial value for this cell and to set up dependencies.
-    * @param lattice The lattice of which the values of this cell are taken from.
-    * @return Returns a cell.
-    */
+  /**
+   * Returns a new cell in this HandlerPool.
+   *
+   * Creates a new cell with the given key. The `init` method is used to
+   * retrieve an initial value for that cell and to set up dependencies via `whenNext`.
+   * It gets called, when the cell is awaited, either directly by the awaitResult method
+   * of the HandlerPool or if a cell that depends on this cell is awaited.
+   *
+   * @param key The key to resolve this cell if in a cycle or insufficient input.
+   * @param init A callback to return the initial value for this cell and to set up dependencies.
+   * @param lattice The lattice of which the values of this cell are taken from.
+   * @return Returns a cell.
+   */
   def createCell[K <: Key[V], V](key: K, init: () => Outcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
     CellCompleter(this, key, init)(lattice).cell
   }
 
-  /** Returns a new cell in this HandlerPool.
-    *
-    * Creates a new, completed cell with value `v`.
-    *
-    * @param lattice The lattice of which the values of this cell are taken from.
-    * @return Returns a cell with value `v`.
-    */
+  /**
+   * Returns a new cell in this HandlerPool.
+   *
+   * Creates a new, completed cell with value `v`.
+   *
+   * @param lattice The lattice of which the values of this cell are taken from.
+   * @return Returns a cell with value `v`.
+   */
   def createCompletedCell[V](result: V)(implicit lattice: Lattice[V]): Cell[DefaultKey[V], V] = {
     CellCompleter.completed(this, result)(lattice).cell
   }
@@ -66,21 +68,22 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     }
   }
 
-
-  /** Register a cell at this HandlerPool.
-    *
-    * @param cell The cell.
-    */
+  /**
+   * Register a cell at this HandlerPool.
+   *
+   * @param cell The cell.
+   */
   private[cell] def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     val registered = cellsNotDone.get()
     val newRegistered = registered + (cell -> cell)
     cellsNotDone.compareAndSet(registered, newRegistered)
   }
 
-  /** Deregister a cell at this HandlerPool.
-    *
-    * @param cell The cell.
-    */
+  /**
+   * Deregister a cell at this HandlerPool.
+   *
+   * @param cell The cell.
+   */
   private[cell] def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     var success = false
     while (!success) {
@@ -246,13 +249,14 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     })
   }
 
-  /** If a cell is triggered, it's `init` method is
-    * run to both get an initial (or possibly final) value
-    * and to set up dependencies. All dependees automatically
-    * get triggered.
-    *
-    * @param cell The cell that is triggered.
-    */
+  /**
+   * If a cell is triggered, it's `init` method is
+   * run to both get an initial (or possibly final) value
+   * and to set up dependencies. All dependees automatically
+   * get triggered.
+   *
+   * @param cell The cell that is triggered.
+   */
   def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     if (cell.markAsRunning())
       execute(() => {
@@ -270,9 +274,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
       })
   }
 
-  /** Possibly initiates an orderly shutdown in which previously
-    * submitted tasks are executed, but no new tasks will be accepted.
-    */
+  /**
+   * Possibly initiates an orderly shutdown in which previously
+   * submitted tasks are executed, but no new tasks will be accepted.
+   */
   def shutdown(): Unit =
     pool.shutdown()
 
