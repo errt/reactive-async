@@ -7,11 +7,8 @@ import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
-import scala.concurrent.{ Future, Promise }
-
-import lattice.Key
-
+import scala.concurrent.{Future, Promise}
+import lattice.{DefaultKey, Key, Lattice}
 import org.opalj.graphs._
 
 /* Need to have reference equality for CAS.
@@ -29,6 +26,33 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
 
+  /** Returns a new cell in this HandlerPool.
+    *
+    * Creates a new cell with the given key. The `init` method is used to
+    * retrieve an initial value for that cell and to set up dependencies via `whenNext`.
+    * It gets called, when the cell is awaited, either directly by the awaitResult method
+    * of the HandlerPool or if a cell that depends on this cell is awaited.
+    *
+    * @param key The key to resolve this cell if in a cycle or insufficient input.
+    * @param init A callback to return the initial value for this cell and to set up dependencies.
+    * @param lattice The lattice of which the values of this cell are taken from.
+    * @return Returns a cell.
+    */
+  def createCell[K <: Key[V], V](key: K, init: () => Outcome[V])(implicit lattice: Lattice[V]): Cell[K, V] = {
+    CellCompleter(this, key, init)(lattice).cell
+  }
+
+  /** Returns a new cell in this HandlerPool.
+    *
+    * Creates a new, completed cell with value `v`.
+    *
+    * @param lattice The lattice of which the values of this cell are taken from.
+    * @return Returns a cell with value `v`.
+    */
+  def createCompletedCell[V](result: V)(implicit lattice: Lattice[V]): Cell[DefaultKey[V], V] = {
+    CellCompleter.completed(this, result)(lattice).cell
+  }
+
   @tailrec
   final def onQuiescent(handler: () => Unit): Unit = {
     val state = poolState.get()
@@ -42,13 +66,22 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     }
   }
 
-  def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+
+  /** Register a cell at this HandlerPool.
+    *
+    * @param cell The cell.
+    */
+  private[cell] def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     val registered = cellsNotDone.get()
     val newRegistered = registered + (cell -> cell)
     cellsNotDone.compareAndSet(registered, newRegistered)
   }
 
-  def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+  /** Deregister a cell at this HandlerPool.
+    *
+    * @param cell The cell.
+    */
+  private[cell] def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     var success = false
     while (!success) {
       val registered = cellsNotDone.get()
@@ -57,6 +90,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     }
   }
 
+  /** Returns all non-completed cells, when quiescence is reached. */
   def quiescentIncompleteCells: Future[List[Cell[_, _]]] = {
     val p = Promise[List[Cell[_, _]]]
     this.onQuiescent { () =>
@@ -97,8 +131,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   def quiescentResolveDefaults[K <: Key[V], V]: Future[Boolean] = {
     val p = Promise[Boolean]
     this.onQuiescent { () =>
-      // Finds the rest of the unresolved cells
-      val rest = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      // Finds the rest of the unresolved cells (that have been triggered)
+      val rest = this.cellsNotDone.get().values.filter(_.isRunning).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -116,8 +150,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
       }
-      // Finds the rest of the unresolved cells
-      val rest = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      // Finds the rest of the unresolved cells (that have been triggered)
+      val rest = this.cellsNotDone.get().values.filter(_.isRunning).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -134,7 +168,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val result = key.resolve(cells)
 
     for ((c, v) <- result) {
-      cells.foreach(c.removeNextCallbacks(_))
+      cells.filterNot(_ == c).foreach(cell => {
+        c.removeNextCallbacks(cell)
+        c.removeCompleteCallbacks(cell)
+      })
       c.resolveWithValue(v)
     }
   }
@@ -147,7 +184,11 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val result = key.fallback(cells)
 
     for ((c, v) <- result) {
-      cells.foreach(c.removeNextCallbacks(_))
+      // TODO Are those removals needed or a no-op anyway?
+      cells.filterNot(_ == c).foreach(cell => {
+        c.removeNextCallbacks(cell)
+        c.removeCompleteCallbacks(cell)
+      })
       c.resolveWithValue(v)
     }
   }
@@ -156,10 +197,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   //def execute(f : => Unit) : Unit =
   //  execute(new Runnable{def run() : Unit = f})
 
-  def execute(fun: () => Unit): Unit =
+  private[cell] def execute(fun: () => Unit): Unit =
     execute(new Runnable { def run(): Unit = fun() })
 
-  def execute(task: Runnable): Unit = {
+  private[cell] def execute(task: Runnable): Unit = {
     // Submit task to the pool
     var submitSuccess = false
     while (!submitSuccess) {
@@ -205,6 +246,33 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     })
   }
 
+  /** If a cell is triggered, it's `init` method is
+    * run to both get an initial (or possibly final) value
+    * and to set up dependencies. All dependees automatically
+    * get triggered.
+    *
+    * @param cell The cell that is triggered.
+    */
+  def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+    if (cell.markAsRunning())
+      execute(() => {
+        val completer = cell.asInstanceOf[CellImpl[K, V]]
+        val outcome = completer.init()
+        outcome match {
+          case FinalOutcome(v) =>
+            completer.putFinal(v)
+          case NextOutcome(v) =>
+            completer.putNext(v)
+            completer.cellDependencies.foreach(triggerExecution)
+          case NoOutcome =>
+            completer.cellDependencies.foreach(triggerExecution)
+        }
+      })
+  }
+
+  /** Possibly initiates an orderly shutdown in which previously
+    * submitted tasks are executed, but no new tasks will be accepted.
+    */
   def shutdown(): Unit =
     pool.shutdown()
 

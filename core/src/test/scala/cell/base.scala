@@ -3,10 +3,10 @@ package cell
 import org.scalatest.FunSuite
 import java.util.concurrent.CountDownLatch
 
-import scala.util.{ Failure, Success }
-import scala.concurrent.{ Await, Promise }
+import scala.util.{Failure, Success}
+import scala.concurrent.{Await, Promise}
 import scala.concurrent.duration._
-import lattice.{ Lattice, StringIntLattice, StringIntKey, LatticeViolationException, DefaultKey, Key }
+import lattice.{DefaultKey, Key, Lattice, LatticeViolationException, StringIntKey, StringIntLattice}
 import opal._
 import org.opalj.br.analyses.Project
 import java.io.File
@@ -860,6 +860,62 @@ class BaseSuite extends FunSuite {
     pool.shutdown()
   }
 
+  test("whenNext and whenComplete: same depender") {
+    val latch1 = new CountDownLatch(1)
+
+    val pool = new HandlerPool
+    val completer1 = CellCompleter[StringIntKey, Int](pool, "c1")
+    val completer2 = CellCompleter[StringIntKey, Int](pool, "c2")
+
+    completer2.cell.whenNext(completer1.cell, (v) => {
+      assert(false)
+      FinalOutcome(10)
+    })
+    completer2.cell.whenComplete(completer1.cell, (v) => {
+      FinalOutcome(10)
+    })
+
+    completer2.cell.onComplete(v => latch1.countDown())
+
+    completer1.putFinal(10)
+
+    latch1.await()
+
+    pool.shutdown()
+
+    assert(completer1.cell.getResult() == 10)
+    assert(completer2.cell.getResult() == 10)
+  }
+
+  test("whenNext and whenComplete: different depender") {
+    val latch1 = new CountDownLatch(2)
+
+    val pool = new HandlerPool
+    val completer1 = CellCompleter[StringIntKey, Int](pool, "c1")
+    val completer2 = CellCompleter[StringIntKey, Int](pool, "c2")
+    val completer3 = CellCompleter[StringIntKey, Int](pool, "c3")
+
+    completer2.cell.whenNext(completer1.cell, (v) => {
+      FinalOutcome(10)
+    })
+    completer3.cell.whenComplete(completer1.cell, (v) => {
+      FinalOutcome(10)
+    })
+
+    completer2.cell.onComplete(v => latch1.countDown())
+    completer2.cell.onComplete(v => latch1.countDown())
+
+    completer1.putFinal(10)
+
+    latch1.await()
+
+    pool.shutdown()
+
+    assert(completer1.cell.getResult() == 10)
+    assert(completer2.cell.getResult() == 10)
+    assert(completer3.cell.getResult() == 10)
+  }
+
   test("putNext and putFinal: concurrency test") {
     val pool = new HandlerPool
 
@@ -936,28 +992,31 @@ class BaseSuite extends FunSuite {
     val latch = new CountDownLatch(4)
 
     val pool = new HandlerPool
+    var cell1: Cell[StringIntKey, Int] = null
+    var cell2: Cell[StringIntKey, Int] = null
+    var cell3: Cell[StringIntKey, Int] = null
+    var cell4: Cell[StringIntKey, Int] = null
 
-    val completer1 = CellCompleter[StringIntKey, Int](pool, "somekey1")
-    val cell1 = completer1.cell
-    val completer2 = CellCompleter[StringIntKey, Int](pool, "somekey2")
-    val cell2 = completer2.cell
-    val completer3 = CellCompleter[StringIntKey, Int](pool, "somekey3")
-    val cell3 = completer3.cell
-    val completer4 = CellCompleter[StringIntKey, Int](pool, "somekey4")
-    val cell4 = completer4.cell
 
-    // set unwanted values:
-    completer1.putNext(-1)
-    completer2.putNext(-1)
-    completer3.putNext(-1)
-    completer4.putNext(-1)
+    cell1 = pool.createCell("somekey1", () => {
+      cell1.whenNext(cell2, v => NextOutcome(-2))
+      cell1.whenNext(cell3, v => NextOutcome(-2))
+      NextOutcome(-1)
+    })
+    cell2 = pool.createCell("somekey2", () => {
+      cell2.whenNext(cell4, v => NextOutcome(-2))
+      NextOutcome(-1)
+    })
+    cell3 = pool.createCell("somekey3", () => {
+      cell3.whenNext(cell4, v => NextOutcome(-2))
+      NextOutcome(-1)
+    })
+    cell4 = pool.createCell("somekey4", () => {
+      cell4.whenNext(cell1, v => NextOutcome(-2))
+      NextOutcome(-1)
+    })
 
     // create a cSCC, assert that none of the callbacks get called.
-    cell1.whenNext(cell2, v => { assert(false); NextOutcome(-2) })
-    cell1.whenNext(cell3, v => { assert(false); NextOutcome(-2) })
-    cell2.whenNext(cell4, v => { assert(false); NextOutcome(-2) })
-    cell3.whenNext(cell4, v => { assert(false); NextOutcome(-2) })
-    cell4.whenNext(cell1, v => { assert(false); NextOutcome(-2) })
 
     for (c <- List(cell1, cell2, cell3, cell4))
       c.onComplete {
@@ -970,10 +1029,11 @@ class BaseSuite extends FunSuite {
           latch.countDown()
       }
 
+    pool.triggerExecution(cell1)
+
     // resolve cells
-    pool.whileQuiescentResolveCell
     val fut = pool.quiescentResolveCell
-    Await.result(fut, 2.second)
+    Await.result(fut, 2.seconds)
     latch.await()
 
     pool.shutdown()
