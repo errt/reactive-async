@@ -903,7 +903,7 @@ class BaseSuite extends FunSuite {
     })
 
     completer2.cell.onComplete(v => latch1.countDown())
-    completer2.cell.onComplete(v => latch1.countDown())
+    completer3.cell.onComplete(v => latch1.countDown())
 
     completer1.putFinal(10)
 
