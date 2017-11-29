@@ -3,10 +3,10 @@ package cell
 import org.scalatest.FunSuite
 import java.util.concurrent.CountDownLatch
 
-import scala.util.{Failure, Success}
-import scala.concurrent.{Await, Promise}
+import scala.util.{ Failure, Success }
+import scala.concurrent.{ Await, Promise }
 import scala.concurrent.duration._
-import lattice.{DefaultKey, Key, Lattice, LatticeViolationException, StringIntKey, StringIntLattice}
+import lattice.{ DefaultKey, Key, Lattice, LatticeViolationException, StringIntKey, StringIntLattice }
 import opal._
 import org.opalj.br.analyses.Project
 import java.io.File
@@ -996,7 +996,6 @@ class BaseSuite extends FunSuite {
     var cell2: Cell[StringIntKey, Int] = null
     var cell3: Cell[StringIntKey, Int] = null
     var cell4: Cell[StringIntKey, Int] = null
-
 
     cell1 = pool.createCell("somekey1", () => {
       cell1.whenNext(cell2, v => NextOutcome(-2))
