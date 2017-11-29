@@ -187,7 +187,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val result = key.fallback(cells)
 
     for ((c, v) <- result) {
-      // TODO Are those removals needed or a no-op anyway?
       cells.filterNot(_ == c).foreach(cell => {
         c.removeNextCallbacks(cell)
         c.removeCompleteCallbacks(cell)
