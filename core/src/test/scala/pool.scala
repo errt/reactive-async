@@ -5,8 +5,6 @@ import org.scalatest.FunSuite
 import scala.concurrent.{ Promise, Await }
 import scala.concurrent.duration._
 
-import cell.HandlerPool
-
 class PoolSuite extends FunSuite {
   test("onQuiescent") {
     val pool = new HandlerPool
