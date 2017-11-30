@@ -227,11 +227,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val result = key.resolve(cells)
 
     for ((c, v) <- result) {
-      cells.foreach(cell => {
-        // Note that there is a better solution for this in https://github.com/phaller/reactive-async/pull/58
-        c.removeNextCallbacks(cell)
-        c.removeCompleteCallbacks(cell)
-      })
+      c.removeAllCallbacks(cells)
       c.resolveWithValue(v)
     }
   }
@@ -244,11 +240,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val result = key.fallback(cells)
 
     for ((c, v) <- result) {
-      cells.foreach(cell => {
-        // Note that there is a better solution for this in https://github.com/phaller/reactive-async/pull/58
-        c.removeNextCallbacks(cell)
-        c.removeCompleteCallbacks(cell)
-      })
+      c.removeAllCallbacks(cells)
       c.resolveWithValue(v)
     }
   }
