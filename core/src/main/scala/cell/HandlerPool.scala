@@ -1,14 +1,15 @@
 package cell
 
-import java.util.concurrent.ForkJoinPool
+import java.util
+import java.util.concurrent.{TimeUnit, TimeUnit => _, _}
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.{ Future, Promise }
-import lattice.{ DefaultKey, Key, Lattice }
+import scala.concurrent.{Future, Promise}
+import lattice.{DefaultKey, Key, Lattice}
 import org.opalj.graphs._
 
 /* Need to have reference equality for CAS.
@@ -18,10 +19,145 @@ private class PoolState(val handlers: List[() => Unit] = List(), val submittedTa
     submittedTasks == 0
 }
 
+trait PriorityV {
+  def priority: Int
+}
+
+trait PriorityRunnable extends Runnable with PriorityV
+
+private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
+  private val q = Seq(new LinkedBlockingDeque[V](), new LinkedBlockingDeque[V](), new LinkedBlockingDeque[V]())
+
+  override def poll(l: Long, timeUnit: TimeUnit): V = {
+    // TODO use collectFirst?
+    if (!q(0).isEmpty) q(0).poll(l, timeUnit)
+    else if (!q(1).isEmpty) q(1).poll(l, timeUnit)
+    else q(2).poll(l, timeUnit)
+  }
+
+  override def remove(o: scala.Any): Boolean = {
+    q.foldLeft(false)((v, queue) => queue.remove(o) && v)
+  }
+
+  override def put(e: V): Unit = {
+    e match {
+      case v: PriorityV => q(v.priority).put(e)
+      case _ => q(1).put(e)
+    }
+  }
+
+  override def offer(e: V): Boolean = {
+    e match {
+      case v: PriorityV => q(v.priority).offer(e)
+      case _ => q(1).offer(e)
+    }
+  }
+
+  override def offer(e: V, l: Long, timeUnit: TimeUnit): Boolean = {
+    e match {
+      case v: PriorityV => q(v.priority).offer(e, l, timeUnit)
+      case _ => q(1).offer(e, l, timeUnit)
+    }
+  }
+
+  override def add(e: V): Boolean = {
+    e match {
+      case v: PriorityV => q(v.priority).add(e)
+      case _ => q(1).add(e)
+    }
+  }
+
+  override def drainTo(collection: util.Collection[_ >: V]): Int = {
+    q.foldLeft(0)((c, queue) => c + queue.drainTo(collection))
+  }
+
+  override def drainTo(collection: util.Collection[_ >: V], i: Int): Int = {
+    q.foldLeft((i, 0))((n, queue) => {
+      val transferred = queue.drainTo(collection, n._1)
+      (n._1 - transferred, n._2 + transferred)
+    })._2
+  }
+
+  override def take(): V = {
+    var r: Option[V] = None
+    while (r.isEmpty)
+      r = q.collectFirst({case queue: BlockingQueue[V] if !queue.isEmpty => queue.poll()}) // is there a concurrency issue? maybe a non-severe one
+    r.get
+  }
+
+  override def contains(o: scala.Any): Boolean = {
+    q.exists(_.contains(o))
+  }
+
+  override def remainingCapacity(): Int = {
+    q.map(_.remainingCapacity()).min
+  }
+
+  override def poll(): V = {
+    q.collectFirst({case queue: BlockingQueue[V] if !queue.isEmpty => queue.poll()}).orNull
+  }
+
+  override def remove(): V = {
+    val head = poll()
+    if (head == null)
+      throw new NoSuchElementException
+    else
+      head
+  }
+
+  override def element(): V = {
+    val head = peek()
+    if (head == null)
+      throw new NoSuchElementException
+    else
+      head
+  }
+
+  override def peek(): V = {
+    q.collectFirst({case q: BlockingQueue[V] if !q.isEmpty => q.peek()}).orNull
+  }
+
+  override def iterator(): util.Iterator[V] = ???
+
+  override def removeAll(collection: util.Collection[_]): Boolean = {
+    q.foldLeft(false)((success, q) => q.removeAll(collection) && success)
+  }
+
+  override def toArray: Array[AnyRef] = ???
+
+  override def toArray[T](ts: Array[T]): Array[T] = ???
+
+  override def containsAll(collection: util.Collection[_]): Boolean = {
+    collection.stream().allMatch(contains(_))
+  }
+
+  override def clear(): Unit = {
+    q.foreach(_.clear())
+  }
+
+  override def isEmpty: Boolean = {
+    q.forall(_.isEmpty)
+  }
+
+  override def size(): Int = {
+    q.foldLeft(0)((c, q) => c + q.size())
+  }
+
+  override def addAll(collection: util.Collection[_ <: V]): Boolean = {
+    var success = false
+    collection.forEach(r => add(r) && success)
+    success
+  }
+
+  override def retainAll(collection: util.Collection[_]): Boolean = {
+    q.foldLeft(false)((success, q) => q.retainAll(collection) && success)
+  }
+}
+
 class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
 
-  private val pool: ForkJoinPool = new ForkJoinPool(parallelism)
-
+//  private val pool: ForkJoinPool = new ForkJoinPool(parallelism)
+  private val pool: ThreadPoolExecutor = new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new GroupedBlockingQueue[Runnable])
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
@@ -202,6 +338,16 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   private[cell] def execute(fun: () => Unit): Unit =
     execute(new Runnable { def run(): Unit = fun() })
 
+  private[cell] def execute(fun: () => Unit, priority: Int): Unit =
+    execute(new PriorityRunnable {
+      override def priority: Int = priority
+      override def run(): Unit = fun()
+    })
+
+  /**
+    * Use a PriorityRunnable to set priority!
+    * @param task
+    */
   private[cell] def execute(task: Runnable): Unit = {
     // Submit task to the pool
     var submitSuccess = false
@@ -256,7 +402,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    *
    * @param cell The cell that is triggered.
    */
-  def triggerExecution[K <: Key[V], V](cell: Cell[K, V]): Unit = {
+  def triggerExecution[K <: Key[V], V](cell: Cell[K, V], priority: Int): Unit = {
     if (cell.markAsRunning())
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
@@ -266,7 +412,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             completer.put(v, isFinal)
           case NoOutcome => /* don't do anything */
         }
-      })
+      }, priority = priority)
   }
 
   /**
