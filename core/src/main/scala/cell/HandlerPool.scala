@@ -262,13 +262,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         val completer = cell.asInstanceOf[CellImpl[K, V]]
         val outcome = completer.init()
         outcome match {
-          case FinalOutcome(v) =>
-            completer.putFinal(v)
-          case NextOutcome(v) =>
-            completer.putNext(v)
-            completer.cellDependencies.foreach(triggerExecution)
-          case NoOutcome =>
-            completer.cellDependencies.foreach(triggerExecution)
+          case Outcome(v, isFinal) =>
+            completer.put(v, isFinal)
+          case NoOutcome => /* don't do anything */
         }
       })
   }

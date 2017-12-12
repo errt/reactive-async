@@ -351,6 +351,7 @@ class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: Lattice[V
           case false => new State(current.res, current.running, current.deps + (other -> List(newDep)), current.callbacks, current.nextDeps, current.nextCallbacks)
         }
         state.compareAndSet(current, newState)
+        pool.triggerExecution(other)
     }
   }
 
