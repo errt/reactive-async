@@ -1,7 +1,8 @@
 package cell
 
 import java.util
-import java.util.concurrent.{BlockingQueue, LinkedBlockingDeque, ThreadPoolExecutor, TimeUnit}
+import java.util.Comparator
+import java.util.concurrent.{TimeUnit, TimeUnit => _, _}
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.annotation.tailrec
@@ -19,155 +20,28 @@ private class PoolState(val quiescenceHandlers: List[() => Unit] = List(), val s
     submittedTasks == 0
 }
 
-trait PriorityV {
-  def priority: Int
+class PrioRunnableComparator extends Comparator[Runnable] {
+  override def compare(t: Runnable, t1: Runnable): Int = {
+    val p = t match {
+      case runnable: PriorityRunnable => runnable.priority
+      case _ => 1
+    }
+    val p1 = t1 match {
+      case runnable: PriorityRunnable => runnable.priority
+      case _ => 1
+    }
+    p - p1
+  }
 }
 
-trait PriorityRunnable extends Runnable with PriorityV
-
-private class GroupedBlockingQueue extends BlockingQueue[Runnable] {
-  private val q = Seq(new LinkedBlockingDeque[Runnable](), new LinkedBlockingDeque[Runnable](), new LinkedBlockingDeque[Runnable]())
-
-  override def poll(l: Long, timeUnit: TimeUnit): Runnable = {
-    // TODO use collectFirst?
-    if (!q(0).isEmpty) q(0).poll(l, timeUnit)
-    else if (!q(1).isEmpty) q(1).poll(l, timeUnit)
-    else q(2).poll(l, timeUnit)
-  }
-
-  override def remove(o: scala.Any): Boolean = {
-    q.foldLeft(false)((v, queue) => queue.remove(o) && v)
-  }
-
-  override def put(e: Runnable): Unit = {
-    e match {
-      case v: PriorityRunnable => q(v.priority).put(e)
-      case _ => q(1).put(e)
-    }
-  }
-
-  override def offer(e: Runnable): Boolean = {
-    // THIS IS USED BY THE THREADPOOL
-    e match {
-      case v: PriorityRunnable =>
-        assert(v.priority >= 0)
-        assert(v.priority <= 2)
-        q(v.priority).offer(e)
-      case _ => q(1).offer(e)
-    }
-  }
-
-  override def offer(e: Runnable, l: Long, timeUnit: TimeUnit): Boolean = {
-    e match {
-      case v: PriorityRunnable => q(v.priority).offer(e, l, timeUnit)
-      case _ => q(1).offer(e, l, timeUnit)
-    }
-  }
-
-  override def add(e: Runnable): Boolean = {
-    e match {
-      case v: PriorityRunnable => q(v.priority).add(e)
-      case _ => q(1).add(e)
-    }
-  }
-
-  override def drainTo(collection: util.Collection[_ >: Runnable]): Int = {
-    q.foldLeft(0)((c, queue) => c + queue.drainTo(collection))
-  }
-
-  override def drainTo(collection: util.Collection[_ >: Runnable], i: Int): Int = {
-    q.foldLeft((i, 0))((n, queue) => {
-      val transferred = queue.drainTo(collection, n._1)
-      (n._1 - transferred, n._2 + transferred)
-    })._2
-  }
-
-  def statusString = q.foldLeft("")((s, q) => s + " " + q.size)
-
-  override def take(): Runnable = {
-    // THIS IS USED BY THE THREADPOOL
-    val s = statusString
-    var r: Option[Runnable] = None
-    while (r.isEmpty || r.get == null)
-      r = q.collectFirst({case queue: BlockingQueue[Runnable] if !queue.isEmpty => queue.poll()}) // is there a concurrency issue? maybe a non-severe one
-    try {
-//      println("Taking " + r.get.asInstanceOf[PriorityRunnable].priority + "  while status was " + statusString)
-    } catch {
-      case e: NullPointerException => println("Taking something else: " + r)
-    }
-    r.get
-  }
-
-  override def contains(o: scala.Any): Boolean = {
-    q.exists(_.contains(o))
-  }
-
-  override def remainingCapacity(): Int = {
-    q.map(_.remainingCapacity()).min
-  }
-
-  override def poll(): Runnable = q.collectFirst({ case queue: BlockingQueue[Runnable] if !queue.isEmpty => queue.poll() }).orNull
-
-  override def remove(): Runnable = {
-    val head = poll()
-    if (head == null)
-      throw new NoSuchElementException
-    else
-      head
-  }
-
-  override def element(): Runnable = {
-    val head = peek()
-    if (head == null)
-      throw new NoSuchElementException
-    else
-      head
-  }
-
-  override def peek(): Runnable = q.collectFirst({ case q: BlockingQueue[Runnable] if !q.isEmpty => q.peek() }).orNull
-
-  override def iterator(): util.Iterator[Runnable] = ???
-
-  override def removeAll(collection: util.Collection[_]): Boolean = {
-    q.foldLeft(false)((success, q) => q.removeAll(collection) && success)
-  }
-
-  override def toArray: Array[AnyRef] = ???
-
-  override def toArray[T](ts: Array[T with Object]): Array[T with Object] = ???
-
-  override def containsAll(collection: util.Collection[_]): Boolean = {
-    collection.stream().allMatch(contains(_))
-  }
-
-  override def clear(): Unit = {
-    q.foreach(_.clear())
-  }
-
-  override def isEmpty: Boolean = {
-    // THIS IS USED BY THE THREADPOOL
-    q.forall(_.isEmpty)
-  }
-
-  override def size(): Int = {
-    q.foldLeft(0)((c, q) => c + q.size())
-  }
-
-  override def addAll(collection: util.Collection[_ <: Runnable]): Boolean = {
-    var success = false
-    collection.forEach(r => add(r) && success)
-    success
-  }
-
-  override def retainAll(collection: util.Collection[_]): Boolean = {
-    q.foldLeft(false)((success, q) => q.retainAll(collection) && success)
-  }
+trait PriorityRunnable extends Runnable {
+  def priority: Int
 }
 
 class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
 
 //  private val pool: ForkJoinPool = new ForkJoinPool(parallelism)
-  private val pool: ThreadPoolExecutor = new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new GroupedBlockingQueue)
+  private val pool: ThreadPoolExecutor = new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new PriorityBlockingQueue[Runnable]())
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
