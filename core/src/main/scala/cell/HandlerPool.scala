@@ -1,7 +1,7 @@
 package cell
 
 import java.util
-import java.util.concurrent.{TimeUnit, TimeUnit => _, _}
+import java.util.concurrent.{BlockingQueue, LinkedBlockingDeque, ThreadPoolExecutor, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.annotation.tailrec
@@ -14,7 +14,7 @@ import org.opalj.graphs._
 
 /* Need to have reference equality for CAS.
  */
-private class PoolState(val handlers: List[() => Unit] = List(), val submittedTasks: Int = 0) {
+private class PoolState(val quiescenceHandlers: List[() => Unit] = List(), val submittedTasks: Int = 0) {
   def isQuiescent(): Boolean =
     submittedTasks == 0
 }
@@ -25,10 +25,10 @@ trait PriorityV {
 
 trait PriorityRunnable extends Runnable with PriorityV
 
-private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
-  private val q = Seq(new LinkedBlockingDeque[V](), new LinkedBlockingDeque[V](), new LinkedBlockingDeque[V]())
+private class GroupedBlockingQueue extends BlockingQueue[Runnable] {
+  private val q = Seq(new LinkedBlockingDeque[Runnable](), new LinkedBlockingDeque[Runnable](), new LinkedBlockingDeque[Runnable]())
 
-  override def poll(l: Long, timeUnit: TimeUnit): V = {
+  override def poll(l: Long, timeUnit: TimeUnit): Runnable = {
     // TODO use collectFirst?
     if (!q(0).isEmpty) q(0).poll(l, timeUnit)
     else if (!q(1).isEmpty) q(1).poll(l, timeUnit)
@@ -39,49 +39,62 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
     q.foldLeft(false)((v, queue) => queue.remove(o) && v)
   }
 
-  override def put(e: V): Unit = {
+  override def put(e: Runnable): Unit = {
     e match {
-      case v: PriorityV => q(v.priority).put(e)
+      case v: PriorityRunnable => q(v.priority).put(e)
       case _ => q(1).put(e)
     }
   }
 
-  override def offer(e: V): Boolean = {
+  override def offer(e: Runnable): Boolean = {
+    // THIS IS USED BY THE THREADPOOL
     e match {
-      case v: PriorityV => q(v.priority).offer(e)
+      case v: PriorityRunnable =>
+        assert(v.priority >= 0)
+        assert(v.priority <= 2)
+        q(v.priority).offer(e)
       case _ => q(1).offer(e)
     }
   }
 
-  override def offer(e: V, l: Long, timeUnit: TimeUnit): Boolean = {
+  override def offer(e: Runnable, l: Long, timeUnit: TimeUnit): Boolean = {
     e match {
-      case v: PriorityV => q(v.priority).offer(e, l, timeUnit)
+      case v: PriorityRunnable => q(v.priority).offer(e, l, timeUnit)
       case _ => q(1).offer(e, l, timeUnit)
     }
   }
 
-  override def add(e: V): Boolean = {
+  override def add(e: Runnable): Boolean = {
     e match {
-      case v: PriorityV => q(v.priority).add(e)
+      case v: PriorityRunnable => q(v.priority).add(e)
       case _ => q(1).add(e)
     }
   }
 
-  override def drainTo(collection: util.Collection[_ >: V]): Int = {
+  override def drainTo(collection: util.Collection[_ >: Runnable]): Int = {
     q.foldLeft(0)((c, queue) => c + queue.drainTo(collection))
   }
 
-  override def drainTo(collection: util.Collection[_ >: V], i: Int): Int = {
+  override def drainTo(collection: util.Collection[_ >: Runnable], i: Int): Int = {
     q.foldLeft((i, 0))((n, queue) => {
       val transferred = queue.drainTo(collection, n._1)
       (n._1 - transferred, n._2 + transferred)
     })._2
   }
 
-  override def take(): V = {
-    var r: Option[V] = None
-    while (r.isEmpty)
-      r = q.collectFirst({case queue: BlockingQueue[V] if !queue.isEmpty => queue.poll()}) // is there a concurrency issue? maybe a non-severe one
+  def statusString = q.foldLeft("")((s, q) => s + " " + q.size)
+
+  override def take(): Runnable = {
+    // THIS IS USED BY THE THREADPOOL
+    val s = statusString
+    var r: Option[Runnable] = None
+    while (r.isEmpty || r.get == null)
+      r = q.collectFirst({case queue: BlockingQueue[Runnable] if !queue.isEmpty => queue.poll()}) // is there a concurrency issue? maybe a non-severe one
+    try {
+//      println("Taking " + r.get.asInstanceOf[PriorityRunnable].priority + "  while status was " + statusString)
+    } catch {
+      case e: NullPointerException => println("Taking something else: " + r)
+    }
     r.get
   }
 
@@ -93,11 +106,9 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
     q.map(_.remainingCapacity()).min
   }
 
-  override def poll(): V = {
-    q.collectFirst({case queue: BlockingQueue[V] if !queue.isEmpty => queue.poll()}).orNull
-  }
+  override def poll(): Runnable = q.collectFirst({ case queue: BlockingQueue[Runnable] if !queue.isEmpty => queue.poll() }).orNull
 
-  override def remove(): V = {
+  override def remove(): Runnable = {
     val head = poll()
     if (head == null)
       throw new NoSuchElementException
@@ -105,7 +116,7 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
       head
   }
 
-  override def element(): V = {
+  override def element(): Runnable = {
     val head = peek()
     if (head == null)
       throw new NoSuchElementException
@@ -113,11 +124,9 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
       head
   }
 
-  override def peek(): V = {
-    q.collectFirst({case q: BlockingQueue[V] if !q.isEmpty => q.peek()}).orNull
-  }
+  override def peek(): Runnable = q.collectFirst({ case q: BlockingQueue[Runnable] if !q.isEmpty => q.peek() }).orNull
 
-  override def iterator(): util.Iterator[V] = ???
+  override def iterator(): util.Iterator[Runnable] = ???
 
   override def removeAll(collection: util.Collection[_]): Boolean = {
     q.foldLeft(false)((success, q) => q.removeAll(collection) && success)
@@ -125,7 +134,7 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
 
   override def toArray: Array[AnyRef] = ???
 
-  override def toArray[T](ts: Array[T]): Array[T] = ???
+  override def toArray[T](ts: Array[T with Object]): Array[T with Object] = ???
 
   override def containsAll(collection: util.Collection[_]): Boolean = {
     collection.stream().allMatch(contains(_))
@@ -136,6 +145,7 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
   }
 
   override def isEmpty: Boolean = {
+    // THIS IS USED BY THE THREADPOOL
     q.forall(_.isEmpty)
   }
 
@@ -143,7 +153,7 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
     q.foldLeft(0)((c, q) => c + q.size())
   }
 
-  override def addAll(collection: util.Collection[_ <: V]): Boolean = {
+  override def addAll(collection: util.Collection[_ <: Runnable]): Boolean = {
     var success = false
     collection.forEach(r => add(r) && success)
     success
@@ -157,7 +167,7 @@ private class GroupedBlockingQueue[V] extends BlockingQueue[V] {
 class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
 
 //  private val pool: ForkJoinPool = new ForkJoinPool(parallelism)
-  private val pool: ThreadPoolExecutor = new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new GroupedBlockingQueue[Runnable])
+  private val pool: ThreadPoolExecutor = new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new GroupedBlockingQueue)
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
@@ -195,9 +205,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   final def onQuiescent(handler: () => Unit): Unit = {
     val state = poolState.get()
     if (state.isQuiescent) {
-      execute(new Runnable { def run(): Unit = handler() })
+      execute(new Runnable { def run(): Unit = handler() }, 1)
     } else {
-      val newState = new PoolState(handler :: state.handlers, state.submittedTasks)
+      val newState = new PoolState(handler :: state.quiescenceHandlers, state.submittedTasks)
       val success = poolState.compareAndSet(state, newState)
       if (!success)
         onQuiescent(handler)
@@ -335,30 +345,24 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   //def execute(f : => Unit) : Unit =
   //  execute(new Runnable{def run() : Unit = f})
 
-  private[cell] def execute(fun: () => Unit): Unit =
-    execute(new Runnable { def run(): Unit = fun() })
-
-  private[cell] def execute(fun: () => Unit, priority: Int): Unit =
-    execute(new PriorityRunnable {
-      override def priority: Int = priority
+  private[cell] def execute(fun: () => Unit, prio: Int): Unit =
+    execute(new Runnable {
       override def run(): Unit = fun()
-    })
+    }, prio)
 
-  /**
-    * Use a PriorityRunnable to set priority!
-    * @param task
-    */
-  private[cell] def execute(task: Runnable): Unit = {
+  private[cell] def execute(task: Runnable, prio: Int): Unit = {
     // Submit task to the pool
     var submitSuccess = false
     while (!submitSuccess) {
       val state = poolState.get()
-      val newState = new PoolState(state.handlers, state.submittedTasks + 1)
+      val newState = new PoolState(state.quiescenceHandlers, state.submittedTasks + 1)
       submitSuccess = poolState.compareAndSet(state, newState)
     }
 
     // Run the task
-    pool.execute(new Runnable {
+    pool.execute(new PriorityRunnable {
+      override def priority: Int = prio
+
       def run(): Unit = {
         try {
           task.run()
@@ -372,10 +376,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             val state = poolState.get()
             if (state.submittedTasks > 1) {
               handlersToRun = None
-              val newState = new PoolState(state.handlers, state.submittedTasks - 1)
+              val newState = new PoolState(state.quiescenceHandlers, state.submittedTasks - 1)
               success = poolState.compareAndSet(state, newState)
             } else if (state.submittedTasks == 1) {
-              handlersToRun = Some(state.handlers)
+              handlersToRun = Some(state.quiescenceHandlers)
               val newState = new PoolState()
               success = poolState.compareAndSet(state, newState)
             } else {
@@ -386,7 +390,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             handlersToRun.get.foreach { handler =>
               execute(new Runnable {
                 def run(): Unit = handler()
-              })
+              }, prio)
             }
           }
         }
@@ -402,7 +406,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    *
    * @param cell The cell that is triggered.
    */
-  def triggerExecution[K <: Key[V], V](cell: Cell[K, V], priority: Int): Unit = {
+  def triggerExecution[K <: Key[V], V](cell: Cell[K, V], priority: Int = 1): Unit = {
     if (cell.markAsRunning())
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]
@@ -412,7 +416,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             completer.put(v, isFinal)
           case NoOutcome => /* don't do anything */
         }
-      }, priority = priority)
+      }, priority)
   }
 
   /**

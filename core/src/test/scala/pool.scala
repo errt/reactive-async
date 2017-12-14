@@ -13,7 +13,7 @@ class PoolSuite extends FunSuite {
     while (i < 10000) {
       val p1 = Promise[Boolean]()
       val p2 = Promise[Boolean]()
-      pool.execute { () => { p1.success(true) }: Unit }
+      pool.execute ({ () => { p1.success(true) }: Unit }, 1)
       pool.onQuiescent { () => p2.success(true) }
       try {
         Await.result(p2.future, 1.seconds)
