@@ -2,7 +2,7 @@ package cell
 
 import java.util
 import java.util.Comparator
-import java.util.concurrent.{TimeUnit, TimeUnit => _, _}
+import java.util.concurrent.{PriorityBlockingQueue, ThreadPoolExecutor, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.annotation.tailrec
@@ -20,7 +20,7 @@ private class PoolState(val quiescenceHandlers: List[() => Unit] = List(), val s
     submittedTasks == 0
 }
 
-class PrioRunnableComparator extends Comparator[Runnable] {
+/*class PrioRunnableComparator extends Comparator[Runnable] {
   override def compare(t: Runnable, t1: Runnable): Int = {
     val p = t match {
       case runnable: PriorityRunnable => runnable.priority
@@ -32,10 +32,18 @@ class PrioRunnableComparator extends Comparator[Runnable] {
     }
     p - p1
   }
-}
+}*/
 
-trait PriorityRunnable extends Runnable {
+trait PriorityRunnable extends Runnable with Comparable[Runnable] {
   def priority: Int
+
+  override def compareTo(t: Runnable): Int = {
+    val p = t match {
+      case runnable: PriorityRunnable => runnable.priority
+      case _ => 1
+    }
+    priority - p
+  }
 }
 
 class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
