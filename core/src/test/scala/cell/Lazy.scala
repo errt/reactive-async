@@ -2,12 +2,12 @@ package cell
 
 import java.util.concurrent.CountDownLatch
 
-import lattice.{DefaultKey, Lattice, StringIntKey, StringIntLattice}
+import lattice.{ DefaultKey, Lattice, StringIntKey, StringIntLattice }
 import org.scalatest.FunSuite
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.util.Success
+import scala.util.{ Failure, Success }
 
 class Lazy extends FunSuite {
 
@@ -337,29 +337,28 @@ class Lazy extends FunSuite {
     //var cell0, cell1, cell2: Cell[StringIntKey, Int] = null
     var cells = Map.empty[Int, Cell[StringIntKey, Int]]
 
-
     var i = 0
 
-    for(i <- 0 to 2) {
+    for (i <- 0 to 2) {
       var c: Cell[StringIntKey, Int] = null
       c = pool.createCell[StringIntKey, Int](s"cell$i", () => {
         println(s"Init root cell$i")
         var cell = c
         var other: Cell[StringIntKey, Int] = pool.createCell[StringIntKey, Int](s"cell$i chain", () => {
-//          println(s"init first cell that cell$i depends on")
+          //          println(s"init first cell that cell$i depends on")
           NextOutcome(1)
         })
         for (p <- 1 to 1000) {
           val last = p == 999
           cell.whenComplete(other, (x: Int) => {
-//            println(s"triggering a whenNext ($p) in the chain of cell$i")
+            //            println(s"triggering a whenNext ($p) in the chain of cell$i")
             Thread.sleep(scala.util.Random.nextInt(1))
             FinalOutcome(x + 1)
           }, i)
           cell = other
           other = pool.createCell[StringIntKey, Int]("cell", () => {
-//            println(s"init a cell that cell$i depends on ($p). FinalOutcome==$last")
-            Outcome(p,  last)
+            //            println(s"init a cell that cell$i depends on ($p). FinalOutcome==$last")
+            Outcome(p, last)
           })
         }
         NextOutcome(0)
@@ -369,13 +368,16 @@ class Lazy extends FunSuite {
 
     val latch = new CountDownLatch(3)
 
-    for(i <- List(2,1,0)) {
+    for (i <- List(2, 1, 0)) {
       val c = cells(i)
-      c.onComplete({case Success(x) => {
-        println(s"completed cell$i with value $x")
-        latch.countDown()
-      }}, i)
-      pool.triggerExecution(c, i)
+      c.onComplete({
+        case Success(x) =>
+          println(s"completed cell$i with value $x")
+          latch.countDown()
+        case Failure(_) =>
+          latch.countDown()
+      }, () => i)
+      pool.triggerExecution(c, () => i)
     }
 
     latch.await()

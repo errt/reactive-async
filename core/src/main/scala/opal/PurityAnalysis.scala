@@ -59,12 +59,14 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     val project = org.opalj.br.analyses.Project(new java.io.File(bin))
     var times = Map.empty[Int, Long]
     val f = { () ⇒ false }
-    for(i <- 1 to 30) {
+    for (i <- 1 to 30) {
       val p = project.recreate()
+      System.gc()
       val report = this.doAnalyze(p, List(), f)
       times = times + (i -> report.time)
     }
-    println(times.values.mkString("\n"))
+    val avg = times.foldLeft(0L)(_ + _._2) / times.size
+    println(times.values.mkString("Times:\n", "\n", s"\nAvg: $avg"))
   }
 
   override def doAnalyze(
@@ -223,9 +225,8 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       deps.values.foreach(targetCell => {
         cell.whenComplete(
           targetCell,
-          p => if (p == Impure) FinalOutcome(Impure) else NoOutcome,
-          -deps.size
-        )
+          (p: Purity) => if (p == Impure) FinalOutcome(Impure) else NoOutcome,
+          () => -(targetCell.totalCellDependencies.size))
       })
       NextOutcome(UnknownPurity) // == NoOutcome
     }
