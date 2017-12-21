@@ -18,6 +18,7 @@ private class PoolState(val quiescenceHandlers: List[() => Unit] = List(), val s
     submittedTasks == 0
 }
 
+
 abstract class PriorityRunnable(val priority: Int) extends Runnable with Comparable[Runnable] {
   override def compareTo(t: Runnable): Int = {
     val p = t match {

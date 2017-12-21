@@ -5,10 +5,10 @@ import java.net.URL
 import scala.collection.JavaConverters._
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import cell.{ HandlerPool, Cell, FinalOutcome, NoOutcome, Outcome, NextOutcome }
+import cell._
 import org.opalj.Success
-import org.opalj.br.{ ClassFile, Method, MethodWithBody, PC }
-import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project }
+import org.opalj.br.{ClassFile, Method, MethodWithBody, PC}
+import org.opalj.br.analyses.{BasicReport, DefaultOneStepAnalysis, Project}
 import org.opalj.br.instructions.GETFIELD
 import org.opalj.br.instructions.GETSTATIC
 import org.opalj.br.instructions.PUTFIELD
