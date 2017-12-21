@@ -337,8 +337,6 @@ class Lazy extends FunSuite {
     //var cell0, cell1, cell2: Cell[StringIntKey, Int] = null
     var cells = Map.empty[Int, Cell[StringIntKey, Int]]
 
-    var i = 0
-
     for (i <- 0 to 2) {
       var c: Cell[StringIntKey, Int] = null
       c = pool.createCell[StringIntKey, Int](s"cell$i", () => {
@@ -354,7 +352,7 @@ class Lazy extends FunSuite {
             //            println(s"triggering a whenNext ($p) in the chain of cell$i")
             Thread.sleep(scala.util.Random.nextInt(1))
             FinalOutcome(x + 1)
-          }, i)
+          })//, i)
           cell = other
           other = pool.createCell[StringIntKey, Int]("cell", () => {
             //            println(s"init a cell that cell$i depends on ($p). FinalOutcome==$last")
@@ -376,8 +374,8 @@ class Lazy extends FunSuite {
           latch.countDown()
         case Failure(_) =>
           latch.countDown()
-      }, () => i)
-      pool.triggerExecution(c, () => i)
+      })//, () => i)
+      pool.triggerExecution(c, i)
     }
 
     latch.await()

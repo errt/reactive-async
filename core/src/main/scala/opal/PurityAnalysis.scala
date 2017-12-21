@@ -117,7 +117,11 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 
     val pureMethodsInfo = pureMethods.map(m => m.toJava).toList.sorted
 
-    new TimingReport(combinedTime)
+    val msg = "pure methods analysis:\n" + pureMethodsInfo.mkString("\n") +
+      s"\nSETUP TIME: $setupTime" +
+      s"\nANALYIS TIME: $analysisTime" +
+      s"\nCOMBINED TIME: $combinedTime"
+    new TimingReport(msg, combinedTime)
   }
 
   /**
@@ -225,8 +229,8 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       deps.values.foreach(targetCell => {
         cell.whenComplete(
           targetCell,
-          (p: Purity) => if (p == Impure) FinalOutcome(Impure) else NoOutcome,
-          () => -(targetCell.totalCellDependencies.size))
+          (p: Purity) => if (p == Impure) FinalOutcome(Impure) else NoOutcome) //,
+        //() => -(targetCell.totalCellDependencies.size))
       })
       NextOutcome(UnknownPurity) // == NoOutcome
     }

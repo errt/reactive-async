@@ -18,23 +18,7 @@ private class PoolState(val quiescenceHandlers: List[() => Unit] = List(), val s
     submittedTasks == 0
 }
 
-/*class PrioRunnableComparator extends Comparator[Runnable] {
-  override def compare(t: Runnable, t1: Runnable): Int = {
-    val p = t match {
-      case runnable: PriorityRunnable => runnable.priority
-      case _ => 1
-    }
-    val p1 = t1 match {
-      case runnable: PriorityRunnable => runnable.priority
-      case _ => 1
-    }
-    p - p1
-  }
-}*/
-
-trait PriorityRunnable extends Runnable with Comparable[Runnable] {
-  def priority: Int
-
+abstract class PriorityRunnable(val priority: Int) extends Runnable with Comparable[Runnable] {
   override def compareTo(t: Runnable): Int = {
     val p = t match {
       case runnable: PriorityRunnable => runnable.priority
@@ -51,6 +35,14 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Cell[_, _]]](Map())
+
+  private var scheduling: SchedulingStrategy = DefaultScheduling
+
+  def setSchedulingStrategy(strategy: SchedulingStrategy): Unit = {
+    scheduling = strategy
+  }
+
+  def getSchedulingStrategy: SchedulingStrategy = scheduling
 
   /**
    * Returns a new cell in this HandlerPool.
@@ -85,7 +77,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   final def onQuiescent(handler: () => Unit): Unit = {
     val state = poolState.get()
     if (state.isQuiescent) {
-      execute(new Runnable { def run(): Unit = handler() }, () => 1)
+      execute(new Runnable { def run(): Unit = handler() }, 0)
     } else {
       val newState = new PoolState(handler :: state.quiescenceHandlers, state.submittedTasks)
       val success = poolState.compareAndSet(state, newState)
@@ -225,12 +217,12 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   //def execute(f : => Unit) : Unit =
   //  execute(new Runnable{def run() : Unit = f})
 
-  private[cell] def execute(fun: () => Unit, prio: () => Int): Unit =
+  private[cell] def execute(fun: () => Unit, priority: Int): Unit =
     execute(new Runnable {
       override def run(): Unit = fun()
-    }, prio)
+    }, priority)
 
-  private[cell] def execute(task: Runnable, prio: () => Int): Unit = {
+  private[cell] def execute(task: Runnable, priority: Int): Unit = {
     // Submit task to the pool
     var submitSuccess = false
     while (!submitSuccess) {
@@ -240,9 +232,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     }
 
     // Run the task
-    pool.execute(new PriorityRunnable {
-      override def priority(): Int = { prio() }
-
+    pool.execute(new PriorityRunnable(priority) {
       def run(): Unit = {
         try {
           task.run()
@@ -270,7 +260,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             handlersToRun.get.foreach { handler =>
               execute(new Runnable {
                 def run(): Unit = handler()
-              }, prio)
+              }, priority)
             }
           }
         }
@@ -286,7 +276,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    *
    * @param cell The cell that is triggered.
    */
-  def triggerExecution[K <: Key[V], V](cell: Cell[K, V], priority: () => Int = () => 1): Unit = {
+  def triggerExecution[K <: Key[V], V](cell: Cell[K, V], priority: Int = 0): Unit = {
     if (cell.markAsRunning())
       execute(() => {
         val completer = cell.asInstanceOf[CellImpl[K, V]]

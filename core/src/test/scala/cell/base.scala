@@ -386,7 +386,7 @@ class BaseSuite extends FunSuite {
           else NoOutcome
         })
         latch.countDown()
-      }, () => 1)
+      }, 0)
     }
 
     latch.await()
@@ -409,8 +409,8 @@ class BaseSuite extends FunSuite {
 
       assert(completer1.cell.numTotalDependencies == 1)
 
-      pool.execute(() => completer2.putNext(ConditionallyImmutable), () => 1)
-      pool.execute(() => completer2.putFinal(Mutable), () => 1)
+      pool.execute(() => completer2.putNext(ConditionallyImmutable),0)
+      pool.execute(() => completer2.putFinal(Mutable), 0)
 
       val fut = pool.quiescentResolveCell
       Await.result(fut, 2.second)
@@ -628,7 +628,7 @@ class BaseSuite extends FunSuite {
     val pool = new HandlerPool
     val latch = new CountDownLatch(1)
     val latch2 = new CountDownLatch(1)
-    pool.execute({ () => latch.await() }, () => 1)
+    pool.execute({ () => latch.await() }, 0)
     pool.onQuiescent { () => latch2.countDown() }
     latch.countDown()
 
@@ -841,9 +841,9 @@ class BaseSuite extends FunSuite {
     for (i <- 1 to 10000) {
       val completer = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey)
 
-      pool.execute(() => completer.putNext(Immutable), () => 1)
-      pool.execute(() => completer.putNext(ConditionallyImmutable), () => 1)
-      pool.execute(() => completer.putNext(Mutable), () => 1)
+      pool.execute(() => completer.putNext(Immutable), 0)
+      pool.execute(() => completer.putNext(ConditionallyImmutable), 0)
+      pool.execute(() => completer.putNext(Mutable), 0)
 
       val p = Promise[Boolean]()
       pool.onQuiescent { () => p.success(true) }
@@ -922,9 +922,9 @@ class BaseSuite extends FunSuite {
     for (i <- 1 to 10000) {
       val completer = CellCompleter[ImmutabilityKey.type, Immutability](pool, ImmutabilityKey)
 
-      pool.execute(() => completer.putNext(Immutable), () => 1)
-      pool.execute(() => completer.putNext(ConditionallyImmutable), () => 1)
-      pool.execute(() => completer.putFinal(Mutable), () => 1)
+      pool.execute(() => completer.putNext(Immutable), 0)
+      pool.execute(() => completer.putNext(ConditionallyImmutable), 0)
+      pool.execute(() => completer.putFinal(Mutable), 0)
 
       val p = Promise[Boolean]()
       pool.onQuiescent { () => p.success(true) }
@@ -977,7 +977,7 @@ class BaseSuite extends FunSuite {
       // NOTE: This will print a stacktrace, but that is fine (not a bug).
       throw new Exception(
         "Even if this happens, quiescent handlers should still run.")
-    }, () => 1)
+    }, 0)
 
     try {
       Await.result(pool.quiescentIncompleteCells, 1.seconds)

@@ -15,7 +15,7 @@ class PoolSuite extends FunSuite {
     while (i < 10000) {
       val p1 = Promise[Boolean]()
       val p2 = Promise[Boolean]()
-      pool.execute({ () => { p1.success(true) }: Unit }, () => 1)
+      pool.execute({ () => { p1.success(true) }: Unit }, 0)
       pool.onQuiescent { () => p2.success(true) }
       try {
         Await.result(p2.future, 1.seconds)
@@ -43,7 +43,7 @@ class PoolSuite extends FunSuite {
           println(p + "\t" + Thread.currentThread().getName)
           latch.countDown()
         }
-      }, () => p)
+      }, p)
     })
     latch.await()
     pool.shutdown()
