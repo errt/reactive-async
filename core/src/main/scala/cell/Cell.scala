@@ -677,16 +677,25 @@ private class NextDepRunnable[K <: Key[V], V](
   val completer: CellCompleter[K, V]) // this
   extends Runnable with OnCompleteRunnable with (Try[V] => Unit) {
   var value: Try[V] = null
+  var lastPropagatedValue: AtomicReference[Option[V]] = new AtomicReference[Option[V]](None)
 
   override def apply(x: Try[V]): Unit = {
     x match {
       case Success(v) =>
-        shortCutValueCallback(cell.getResult()) match {
-          case NextOutcome(v) =>
-            completer.putNext(v)
-          case FinalOutcome(v) =>
-            completer.putFinal(v)
-          case _ => /* do nothing */
+        var success = false
+        var old: Option[V] = null
+        while (!success) {
+          old = lastPropagatedValue.get()
+          success = lastPropagatedValue.compareAndSet(old, Some(cell.getResult()))
+        }
+        if (old.isEmpty || !old.contains(cell.getResult())) {
+          shortCutValueCallback(cell.getResult()) match {
+            case NextOutcome(v) =>
+              completer.putNext(v)
+            case FinalOutcome(v) =>
+              completer.putFinal(v)
+            case _ => /* do nothing */
+          }
         }
       case Failure(e) => /* do nothing */
     }
