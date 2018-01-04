@@ -179,7 +179,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   implicit val ctx = pool
 
-  private val nodepslatch = new CountDownLatch(1)
+  private val nocompletedepslatch = new CountDownLatch(1)
   private val nonextdepslatch = new CountDownLatch(1)
 
   /* Contains a value either of type
@@ -321,6 +321,18 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     this.whenComplete(other, valueCallback(_, true))
   }
 
+  /**
+   * Adds dependency on `other` cell: when `other` cell receives an intermediate result by using
+   *  `putNext`, evaluate `pred` with the result of `other`. If this evaluation yields `WhenNext`
+   *  or `WhenNextComplete`, `this` cell receives an intermediate or a final result `v`
+   *  respectively. To calculate `v`, the `valueCallback` function is called with the result of `other`.
+   *
+   *  If `v` is `Some(v)`, then the shortcut value is `v`. Otherwise if `value` is `None`,
+   *  the cell is not updated.
+   *
+   *  The thereby introduced dependency is removed when `this` cell
+   *  is completed (either prior or after an invocation of `whenNext`).
+   */
   override def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
     this.whenNext(other, valueCallback, sequential = false)
   }
@@ -353,12 +365,19 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           if (depRegistered) {
             success = true
             other.addNextCallback(newDep, this)
-            pool.triggerExecution(other)
+            pool.triggerExecution(other, pool.getSchedulingStrategy.calcPriority(this, other)) // Check, if strategy(this, other) or strategy(other, this) is correct.  (also in whenNext)
           }
       }
     }
   }
-
+  /**
+   * Adds dependency on `other` cell: when `other` cell is completed, evaluate `pred`
+   *  with the result of `other`. If this evaluation yields true, complete `this` cell
+   *  with what the function `valueCallback` returns.
+   *
+   *  The thereby introduced dependency is removed when `this` cell
+   *  is completed (either prior or after an invocation of `whenComplete`).
+   */
   override def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
     this.whenComplete(other, valueCallback, false)
   }
@@ -391,7 +410,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           if (depRegistered) {
             success = true
             other.addCompleteCallback(newDep, this)
-            pool.triggerExecution(other)
+            pool.triggerExecution(other, pool.getSchedulingStrategy.calcPriority(this, other)) // Check, if strategy(this, other) or strategy(other, this) is correct. (also in whenNext)
           }
       }
     }
@@ -503,7 +522,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   @tailrec
-  override private[cell] final def removeDep(cell: Cell[K, V]): Unit = {
+  override private[cell] final def removeCompleteDep(cell: Cell[K, V]): Unit = {
     state.get() match {
       case pre: State[_, _] =>
         val current = pre.asInstanceOf[State[K, V]]
@@ -511,9 +530,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         val newState = new State(current.res, current.tasksActive, newDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks)
         if (!state.compareAndSet(current, newState))
-          removeDep(cell)
+          removeCompleteDep(cell)
         else if (newDeps.isEmpty)
-          nodepslatch.countDown()
+          nocompletedepslatch.countDown()
 
       case _ => /* do nothing */
     }
@@ -565,7 +584,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override private[cell] def waitUntilNoDeps(): Unit = {
-    nodepslatch.await()
+    nocompletedepslatch.await()
   }
 
   override private[cell] def waitUntilNoNextDeps(): Unit = {
@@ -583,11 +602,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    * @return Returns true, iff the cell's status changed (i.e. it had not been running before).
    */
   @tailrec
-  override private[cell] final def setTasksActive(): Boolean = state.get() match {
-    case pre: State[_, _] =>
-      if (pre.tasksActive)
-        false
-      else {
+  override private[cell] final def markAsRunning(): Boolean = {
+    state.get() match {
+      case pre: State[_, _] =>
         val current = pre.asInstanceOf[State[K, V]]
         val newState = new State(current.res, true, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks)
         if (!state.compareAndSet(current, newState)) setTasksActive()
@@ -614,7 +631,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    *  to the root promise when linking two promises together.
    */
   @tailrec
-  private def dispatchOrAddCallback(runnable: CompleteCallbackRunnable[K, V]): Unit = {
+  private def dispatchOrAddCompleteCallback(runnable: CompleteCallbackRunnable[K, V]): Unit = {
     state.get() match {
       case r: Try[_] => runnable.execute()
       // case _: DefaultPromise[_] => compressedRoot().dispatchOrAddCallback(runnable)
@@ -625,7 +642,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case true => new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks + (runnable.dependentCell -> (runnable :: current.completeCallbacks(runnable.dependentCell))), current.nextDeps, current.nextCallbacks)
           case false => new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks + (runnable.dependentCell -> List(runnable)), current.nextDeps, current.nextCallbacks)
         }
-        if (!state.compareAndSet(pre, newState)) dispatchOrAddCallback(runnable)
+        if (!state.compareAndSet(pre, newState)) dispatchOrAddCompleteCallback(runnable)
     }
   }
 

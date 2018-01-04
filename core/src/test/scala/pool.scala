@@ -2,6 +2,8 @@ package cell
 
 import java.util.concurrent.ConcurrentHashMap
 
+import java.util.concurrent.CountDownLatch
+
 import org.scalatest.FunSuite
 
 import scala.concurrent.{ Await, Promise }
@@ -16,7 +18,7 @@ class PoolSuite extends FunSuite {
     while (i < 10000) {
       val p1 = Promise[Boolean]()
       val p2 = Promise[Boolean]()
-      pool.execute { () => { p1.success(true) }: Unit }
+      pool.execute({ () => { p1.success(true) }: Unit }, 0)
       pool.onQuiescent { () => p2.success(true) }
       try {
         Await.result(p2.future, 1.seconds)
@@ -41,7 +43,7 @@ class PoolSuite extends FunSuite {
         completer.cell.trigger()
         regCells.put(completer.cell, completer.cell)
         ()
-      })
+      }, 0) // TODO check priority
     }
     val fut = pool.quiescentResolveDefaults // set all (registered) cells to 1 via key.fallback
     Await.ready(fut, 5.seconds)
@@ -60,7 +62,7 @@ class PoolSuite extends FunSuite {
         val completer = CellCompleter[StringIntKey, Int]("somekey")
         regCells.put(completer.cell, completer.cell)
         ()
-      })
+      }, 0) // TODO check priority
     }
     val fut = pool.quiescentResolveDefaults // set all (registered) cells to 1 via key.fallback
     Await.ready(fut, 5.seconds)
@@ -68,4 +70,28 @@ class PoolSuite extends FunSuite {
     assert(regCells.size === 1000)
   }
 
+
+  test("prio") {
+    // this tests demonstrates, that high priority tasks are executed with high priority:
+    // The output should be roughly sorted.
+    val n = 99
+    val pool = new HandlerPool(2)
+    val latch = new CountDownLatch(n)
+
+    // generate a random list of priorities
+    val ps = scala.util.Random.shuffle((1 to n).toList)
+
+    // create a task for each priority
+    ps.foreach(p => {
+      pool.execute(new Runnable {
+        override def run(): Unit = {
+          println(p + "\t" + Thread.currentThread().getName)
+          latch.countDown()
+        }
+      }, p)
+    })
+    latch.await()
+    pool.shutdown()
+    println(ps)
+  }
 }
