@@ -1039,7 +1039,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case _: FinalState[K, V] =>
           /* We are final already, so we ignore all incoming information. */
         }
-      })
+      }, pool.getSchedulingStrategy.calcPriority(this, otherCell))
     case _: FinalState[K, V] => /* We are final already, so we ignore all incoming information. */
   }
 
