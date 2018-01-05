@@ -81,7 +81,7 @@ trait Cell[K <: Key[V], V] {
   private[cell] def numCompleteCallbacks: Int
 
   private[cell] def addCallback[U](callback: Try[V] => U, cell: Cell[K, V]): Unit
-  private[cell] def addNextCallback[U](callback: Try[V] => U, cell: Cell[K, V]): Unit
+  private[cell] def addNextCallback(callback: NextDepRunnable[K, V], cell: Cell[K, V]): Unit
 
   private[cell] def resolveWithValue(value: V): Unit
   private[cell] def cellDependencies: Seq[Cell[K, V]]
@@ -354,7 +354,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
     dispatchOrAddCallback(runnable)
   }
 
-  override private[cell] def addNextCallback[U](callback: Try[V] => U, cell: Cell[K, V]): Unit = {
+  override private[cell] def addNextCallback(callback: NextDepRunnable[K, V], cell: Cell[K, V]): Unit = {
     val runnable = new NextCallbackRunnable[K, V](pool, callback, cell)
     dispatchOrAddNextCallback(runnable)
   }
@@ -681,22 +681,15 @@ private class NextDepRunnable[K <: Key[V], V](
 
   override def apply(x: Try[V]): Unit = {
     x match {
-      case Success(v) =>
-        var success = false
-        var old: Option[V] = null
-        while (!success) {
-          old = lastPropagatedValue.get()
-          success = lastPropagatedValue.compareAndSet(old, Some(cell.getResult()))
+      case Success(_) =>
+        shortCutValueCallback(cell.getResult()) match {
+          case NextOutcome(v) =>
+            completer.putNext(v)
+          case FinalOutcome(v) =>
+            completer.putFinal(v)
+          case _ => /* do nothing */
         }
-        if (old.isEmpty || !old.contains(cell.getResult())) {
-          shortCutValueCallback(cell.getResult()) match {
-            case NextOutcome(v) =>
-              completer.putNext(v)
-            case FinalOutcome(v) =>
-              completer.putFinal(v)
-            case _ => /* do nothing */
-          }
-        }
+
       case Failure(e) => /* do nothing */
     }
 
@@ -718,10 +711,23 @@ private class NextDepRunnable[K <: Key[V], V](
  * @param onNext   Callback function that is triggered on an onNext event
  * @param dependee The cell that depends on this callback
  */
-private class NextCallbackRunnable[K <: Key[V], V](val executor: HandlerPool, val onNext: Try[V] => Any, val dependee: Cell[K, V]) {
+private class NextCallbackRunnable[K <: Key[V], V](val executor: HandlerPool, val onNext: NextDepRunnable[K, V], val dependee: Cell[K, V]) {
   def executeWithValue(v: Try[V]): Unit = {
     // Note that we cannot prepare the ExecutionContext at this point, since we might
     // already be running on a different thread!
-    try executor.execute(() => { onNext(v); () }) catch { case NonFatal(t) => executor reportFailure t }
+    val v = onNext.cell.getResult()
+    var success = false
+    var old: Option[V] = null
+    while (!success) {
+      old = onNext.lastPropagatedValue.get()
+      success = onNext.lastPropagatedValue.compareAndSet(old, Some(onNext.cell.getResult()))
+    }
+    if (old.isEmpty || !old.contains(onNext.cell.getResult())) {
+      try executor.execute(() => {
+        onNext(v); ()
+      }) catch {
+        case NonFatal(t) => executor reportFailure t
+      }
+    }
   }
 }
