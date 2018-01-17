@@ -12,8 +12,6 @@ import scala.concurrent.{ Future, Promise }
 
 import lattice.Key
 
-import org.opalj.graphs._
-
 /* Need to have reference equality for CAS.
  */
 private class PoolState(val handlers: List[() => Unit] = List(), val submittedTasks: Int = 0) {
@@ -86,7 +84,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
       // Find one closed strongly connected component (cell)
       val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (registered.nonEmpty) {
-        val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
+        val cSCCs = graphs.closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
       }
       p.success(true)
@@ -113,7 +111,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
       // Find one closed strongly connected component (cell)
       val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().values.asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (registered.nonEmpty) {
-        val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
+        val cSCCs = graphs.closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
       }
       // Finds the rest of the unresolved cells
