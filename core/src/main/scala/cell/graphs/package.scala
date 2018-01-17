@@ -28,7 +28,7 @@
  */
 /* Copied and slightly adapted from OPAL:
  * - All unused methods and imports have been removed.
- * - An explicit type information has been added.
+ * - Use a List assigned to a var instead of mutable.Stack (deprecated since 2.12)
  */
 package cell
 
@@ -154,7 +154,8 @@ package object graphs {
       var nextDFSNum = thisPathFirstDFSNum
       var nextCSCCId = 1
       val path = mutable.ArrayBuffer.empty[N]
-      val worklist = mutable.Stack.empty[N].asInstanceOf[mutable.Stack[N]] //Changed this for usage of `worklist` raised type errors.
+      var worklist = List.empty[N]
+      //val worklist = mutable.Stack.empty[N].asInstanceOf[mutable.Stack[N]] //Changed this for usage of `worklist` raised type errors.
 
       // HELPER METHODS
       def addToPath(n: N): DFSNum = {
@@ -171,7 +172,7 @@ package object graphs {
 
       // INITIALIZATION
       addToPath(n)
-      worklist.push(n).push(PathElementSeparator).pushAll(es(n))
+      worklist = es(n).toList ++ (PathElementSeparator :: n :: worklist)
 
       // PROCESSING
       while (worklist.nonEmpty) {
@@ -180,9 +181,11 @@ package object graphs {
         //  s"thisParthFirstDFSNum=$thisPathFirstDFSNum; "+
         //  s"nextDFSNum=$nextDFSNum; nextCSCCId=$nextCSCCId }")
 
-        val n = worklist.pop()
+        val n = worklist.head
+        worklist = worklist.tail
         if (n eq PathElementSeparator) { // i.e., we have visited all child elements
-          val n = worklist.pop()
+          val n = worklist.head
+          worklist = worklist.tail
           val nDFSNum = dfsNum(n)
           if (nDFSNum >= thisPathFirstDFSNum) {
             //                        println(s"visited all children of $n")
@@ -249,13 +252,12 @@ package object graphs {
           } else {
             // we are visiting the element for the first time
             addToPath(n)
-            worklist.push(n)
-            worklist.push(PathElementSeparator)
+            worklist = PathElementSeparator :: n :: worklist
             es(n) foreach { nextN ⇒
               if (hasDFSNum(nextN) && dfsNum(nextN) < thisPathFirstDFSNum) {
                 killPath()
               } else {
-                worklist.push(nextN)
+                worklist = nextN :: worklist
               }
             }
           }
