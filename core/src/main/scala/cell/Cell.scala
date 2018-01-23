@@ -597,7 +597,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
 
   // Schedules execution of `callback` when next intermediate result is available.
   override private[cell] def onNext[U](callback: Try[V] => U): Unit = {
-    val runnable = new NextCallbackRunnable[K, V](pool, this, this, callback)
+    val runnable = new NextConcurrentCallbackRunnable[K, V](pool, this, this, callback)
     dispatchOrAddNextCallback(runnable)
   }
 
