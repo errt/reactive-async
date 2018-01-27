@@ -54,7 +54,7 @@ private[cell] trait SequentialCallbackRunnable[K <: Key[V], V] extends CallbackR
  * A dependency between to cells consisting of a dependent cell(completer),
   * an other cell and the callback to calculate new values for the dependent cell.
  */
-private[cell] trait Dependency[K <: Key[V], V] {
+private[cell] trait DependencyRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
   val dependentCompleter: CellCompleter[K, V]
   val otherCell: Cell[K, V]
   val valueCallback: V => Outcome[V]
@@ -103,7 +103,9 @@ private[cell] abstract class CompleteDepRunnable[K <: Key[V], V](
   override val otherCell: Cell[K, V],
   override val valueCallback: V => Outcome[V]) extends CompleteCallbackRunnable[K, V](pool, dependentCompleter.cell, otherCell, {
   case Success(x) =>
-    valueCallback(x) match {
+    dependentCompleter.cell.incIncomingCallbacks()
+    val outcome = valueCallback(x)
+    outcome match {
       case FinalOutcome(v) =>
         dependentCompleter.putFinal(v) // deps will be removed by putFinal()
       case NextOutcome(v) =>
@@ -114,10 +116,11 @@ private[cell] abstract class CompleteDepRunnable[K <: Key[V], V](
         dependentCompleter.removeDep(otherCell)
         dependentCompleter.removeNextDep(otherCell)
     }
+    dependentCompleter.cell.decIncomingCallbacks()
   case Failure(_) =>
     dependentCompleter.removeDep(otherCell)
     dependentCompleter.removeNextDep(otherCell)
-}) with Dependency[K, V]
+}) with DependencyRunnable[K, V]
 
 /**
  * Dependency between `dependentCompleter` and `otherCell`.
@@ -196,13 +199,16 @@ private[cell] abstract class NextDepRunnable[K <: Key[V], V](
   override val valueCallback: V => Outcome[V]) extends NextCallbackRunnable[K, V](pool, dependentCompleter.cell, otherCell, t => {
   t match {
     case Success(_) =>
-      valueCallback(otherCell.getResult()) match {
+      dependentCompleter.cell.incIncomingCallbacks()
+      val outcome = valueCallback(otherCell.getResult())
+      outcome match {
         case NextOutcome(v) =>
           dependentCompleter.putNext(v)
         case FinalOutcome(v) =>
           dependentCompleter.putFinal(v)
         case _ => /* do nothing */
       }
+      dependentCompleter.cell.decIncomingCallbacks()
     case Failure(_) => /* do nothing */
   }
 
@@ -210,7 +216,7 @@ private[cell] abstract class NextDepRunnable[K <: Key[V], V](
   // There is no need to removeCompleteDeps, because if those existed,
   // a CompleteDepRunnable would have been called and removed the dep
   if (otherCell.isComplete) dependentCompleter.removeNextDep(otherCell)
-}) with Dependency[K, V]
+}) with DependencyRunnable[K, V]
 
 /**
  * Dependency between `dependentCompleter` and `otherCell`.

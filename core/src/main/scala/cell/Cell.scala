@@ -1,11 +1,11 @@
 package cell
 
-import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{ CountDownLatch, ExecutionException }
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.{CountDownLatch, ExecutionException}
 
 import scala.annotation.tailrec
-import scala.util.{ Failure, Success, Try }
-import lattice.{ DefaultKey, Key, Lattice, LatticeViolationException }
+import scala.util.{Failure, Success, Try}
+import lattice.{DefaultKey, Key, Lattice, LatticeViolationException}
 
 import scala.concurrent.OnCompleteRunnable
 
@@ -106,6 +106,9 @@ trait Cell[K <: Key[V], V] {
 
   private[cell] def removeCompleteCallbacks(cell: Cell[K, V]): Unit
   private[cell] def removeNextCallbacks(cell: Cell[K, V]): Unit
+
+  private[cell] def incIncomingCallbacks(): Int
+  private[cell] def decIncomingCallbacks(): Int
 }
 
 object Cell {
@@ -179,6 +182,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
    * Assumes that dependencies need to be kept until a final result is known.
    */
   private val state = new AtomicReference[AnyRef](State.empty[K, V](lattice))
+  private val numIncomingCallbacks = new AtomicInteger(0) // Should this be included into `state`?
 
   // `CellCompleter` and corresponding `Cell` are the same run-time object.
   override def cell: Cell[K, V] = this
@@ -472,10 +476,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
           if (!state.compareAndSet(current, newState)) {
             tryNewState(value)
           } else {
-            // CAS was successful, so there was a point in time where `newVal` was in the cell
-            current.nextCallbacks.values.foreach { callbacks =>
-              callbacks.foreach(callback => callback.execute())
-            }
+            // If we came here via a direct putNext (instead of Outcome of a whenNextCallback)
+            // this incoming change has not been counted. So we need to manually start outgoing callbacks.
+            // (This might lead to duplicate invocation.)
+            if (numIncomingCallbacks.get() == 0) triggerOutgoingNextCallbacks() //
             true
           }
         } else true
@@ -512,28 +516,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
         res
 
       case (pre: State[K, V], newVal: Try[V]) =>
+        triggerOutgoingCompleteCallbacks(pre)
+
         val depsCells = pre.completeDeps
         val nextDepsCells = pre.nextDeps
-        if (pre.completeCallbacks.isEmpty) {
-          // call callbacks
-          pre.nextCallbacks.values.foreach { callbacks =>
-            callbacks.foreach(callback => callback.execute())
-          }
-        } else {
-          // onNext callbacks with these cells should not be triggered, because they have
-          // onComplete callbacks which are triggered instead.
-          pre.completeCallbacks.values.foreach { callbacks =>
-            callbacks.foreach(callback => callback.execute())
-          }
-          // call (concurrent) callbacks
-          pre.nextCallbacks.values.foreach { callbacks =>
-            callbacks.foreach { callback =>
-              if (!pre.completeCallbacks.contains(callback.dependentCell))
-                callback.execute()
-            }
-          }
-        }
 
+        // Other cells do not need to call as any more
         if (depsCells.nonEmpty)
           depsCells.foreach(_.removeCompleteCallbacks(this))
         if (nextDepsCells.nonEmpty)
@@ -546,6 +534,44 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
     }
     res
   }
+
+
+  private def triggerOutgoingNextCallbacks(): Unit = {
+    state.get() match {
+      case _: Try[_] => /* Meanwhile, cell has been completed. No need to trigger `next` callbacks any more. */
+      case raw: State[_, _] =>
+        val current = raw.asInstanceOf[State[K, V]]
+        current.nextCallbacks.values.foreach {  callbacks =>
+          callbacks.foreach (callback => callback.execute () )
+        }
+    }
+  }
+
+  // We need to pass the list of callbacks here, before they
+  // might have already been deleted in `state` while the cell has
+  // been set to its final value.
+  private def triggerOutgoingCompleteCallbacks(pre: State[K, V]): Unit = {
+    if (pre.completeCallbacks.isEmpty) {
+      // call callbacks
+      pre.nextCallbacks.values.foreach { callbacks =>
+        callbacks.foreach(callback => callback.execute())
+      }
+    } else {
+      // onNext callbacks with these cells should not be triggered, because they have
+      // onComplete callbacks which are triggered instead.
+      pre.completeCallbacks.values.foreach { callbacks =>
+        callbacks.foreach(callback => callback.execute())
+      }
+      // call (concurrent) callbacks
+      pre.nextCallbacks.values.foreach { callbacks =>
+        callbacks.foreach { callback =>
+          if (!pre.completeCallbacks.contains(callback.dependentCell))
+            callback.execute()
+        }
+      }
+    }
+  }
+
 
   @tailrec
   override private[cell] final def removeDep(cell: Cell[K, V]): Unit = {
@@ -560,7 +586,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
         else if (newDeps.isEmpty)
           nodepslatch.countDown()
 
-      case _ => /* do nothing */
+      case _ => /* `this` has been completed and therefore does not have any deps stored. */
     }
   }
 
@@ -577,7 +603,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
         else if (newNextDeps.isEmpty)
           nonextdepslatch.countDown()
 
-      case _ => /* do nothing */
+      case _ => /* `this` has been completed and therefore does not have any deps stored. */
     }
   }
 
@@ -687,4 +713,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
     case t => Failure(t)
   }
 
+  override private[cell] def incIncomingCallbacks(): Int = {
+    numIncomingCallbacks.incrementAndGet()
+  }
+
+  override private[cell] def decIncomingCallbacks(): Int = {
+    val newValue = numIncomingCallbacks.decrementAndGet()
+    if(newValue == 0) triggerOutgoingNextCallbacks()
+    newValue
+  }
 }
