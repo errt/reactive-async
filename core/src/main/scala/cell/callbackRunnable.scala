@@ -65,6 +65,7 @@ private[cell] trait Dependency[K <: Key[V], V] {
 
 /**
  * To be run when `otherCell` gets its final update.
+ *
  * @param pool          The handler pool that runs the callback function
  * @param dependentCell The cell, that depends on `otherCell`.
  * @param otherCell     Cell that triggers this callback.
@@ -83,7 +84,12 @@ private[cell] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   def run(): Unit = {
     require(!started) // can't complete it twice
     started = true
+
+    if (dependentCell != null) // dependentCell == null for oncomplete callbacks
+      dependentCell.incIncomingCallbacks()
     callback(Success(otherCell.getResult()))
+    if (dependentCell != null)
+      dependentCell.decIncomingCallbacks()
   }
 }
 
@@ -166,7 +172,11 @@ private[cell] abstract class NextCallbackRunnable[K <: Key[V], V](
   extends CallbackRunnable[K, V] {
 
   def run(): Unit = {
+    if (dependentCell != null) // dependetCell == null for onnext callbacks
+      dependentCell.incIncomingCallbacks()
     callback(Success(otherCell.getResult()))
+    if (dependentCell != null)
+      dependentCell.decIncomingCallbacks()
   }
 }
 
