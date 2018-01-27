@@ -1,11 +1,11 @@
 package cell
 
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import java.util.concurrent.{CountDownLatch, ExecutionException}
+import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
+import java.util.concurrent.{ CountDownLatch, ExecutionException }
 
 import scala.annotation.tailrec
-import scala.util.{Failure, Success, Try}
-import lattice.{DefaultKey, Key, Lattice, LatticeViolationException}
+import scala.util.{ Failure, Success, Try }
+import lattice.{ DefaultKey, Key, Lattice, LatticeViolationException }
 
 import scala.concurrent.OnCompleteRunnable
 
@@ -535,14 +535,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
     res
   }
 
-
   private def triggerOutgoingNextCallbacks(): Unit = {
     state.get() match {
       case _: Try[_] => /* Meanwhile, cell has been completed. No need to trigger `next` callbacks any more. */
       case raw: State[_, _] =>
         val current = raw.asInstanceOf[State[K, V]]
-        current.nextCallbacks.values.foreach {  callbacks =>
-          callbacks.foreach (callback => callback.execute () )
+        current.nextCallbacks.values.foreach { callbacks =>
+          callbacks.foreach(callback => callback.execute())
         }
     }
   }
@@ -571,7 +570,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
       }
     }
   }
-
 
   @tailrec
   override private[cell] final def removeDep(cell: Cell[K, V]): Unit = {
@@ -719,7 +717,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
 
   override private[cell] def decIncomingCallbacks(): Int = {
     val newValue = numIncomingCallbacks.decrementAndGet()
-    if(newValue == 0) triggerOutgoingNextCallbacks()
+    if (newValue == 0) triggerOutgoingNextCallbacks()
     newValue
   }
 }

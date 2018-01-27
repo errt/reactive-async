@@ -170,7 +170,6 @@ class BaseSuite extends FunSuite {
     pool.shutdown()
   }
 
-
   test("whenCompleteSequential: dependency 1") {
     val latch = new CountDownLatch(1)
 
@@ -2010,8 +2009,7 @@ class BaseSuite extends FunSuite {
       })
 
       pool.execute(() =>
-        completer2.putFinal(i)
-      )
+        completer2.putFinal(i))
     }
 
     latch.await()
@@ -2023,43 +2021,43 @@ class BaseSuite extends FunSuite {
   }
 
   test("whenNextSequential: calling sequentially") {
-  val n = 1000
+    val n = 1000
 
-  val runningCallbacks = new AtomicInteger(0)
-  val latch = new CountDownLatch(1)
-  val random = new scala.util.Random()
+    val runningCallbacks = new AtomicInteger(0)
+    val latch = new CountDownLatch(1)
+    val random = new scala.util.Random()
 
-  val pool = new HandlerPool
-  val completer1 = CellCompleter[lattice.NaturalNumberKey.type, Int](pool, lattice.NaturalNumberKey)(new lattice.NaturalNumberLattice)
-  val completer2 = CellCompleter[lattice.NaturalNumberKey.type, Int](pool, lattice.NaturalNumberKey)(new lattice.NaturalNumberLattice)
+    val pool = new HandlerPool
+    val completer1 = CellCompleter[lattice.NaturalNumberKey.type, Int](pool, lattice.NaturalNumberKey)(new lattice.NaturalNumberLattice)
+    val completer2 = CellCompleter[lattice.NaturalNumberKey.type, Int](pool, lattice.NaturalNumberKey)(new lattice.NaturalNumberLattice)
 
-  val cell1 = completer1.cell
-  cell1.whenNextSequential(completer2.cell, (x: Int) => {
-    assert(runningCallbacks.incrementAndGet() == 1)
-    Thread.`yield`()
-    try {
-      Thread.sleep(random.nextInt(3))
-    } catch {
-      case _: InterruptedException => /* ignore this */
-    }
-    assert(runningCallbacks.decrementAndGet() == 0)
-    Outcome(x * n, x == n)
-  })
+    val cell1 = completer1.cell
+    cell1.whenNextSequential(completer2.cell, (x: Int) => {
+      assert(runningCallbacks.incrementAndGet() == 1)
+      Thread.`yield`()
+      try {
+        Thread.sleep(random.nextInt(3))
+      } catch {
+        case _: InterruptedException => /* ignore this */
+      }
+      assert(runningCallbacks.decrementAndGet() == 0)
+      Outcome(x * n, x == n)
+    })
 
-  cell1.onComplete(_ => {
-    latch.countDown()
-  })
+    cell1.onComplete(_ => {
+      latch.countDown()
+    })
 
-  for (i <- 1 to n)
-    pool.execute(() => completer2.putNext(i))
+    for (i <- 1 to n)
+      pool.execute(() => completer2.putNext(i))
 
-  latch.await()
+    latch.await()
 
-  assert(cell1.getResult() == n * n)
-  assert(completer2.cell.getResult() == n)
+    assert(cell1.getResult() == n * n)
+    assert(completer2.cell.getResult() == n)
 
-  pool.shutdown()
-}
+    pool.shutdown()
+  }
 
   test("whenNextSequential: state") {
     val n = 1000
@@ -2144,7 +2142,6 @@ class BaseSuite extends FunSuite {
       pool.execute(() => completer2.putFinal(i))
 
     }
-
 
     latch.await()
     otherLatches.foreach(_.await())
