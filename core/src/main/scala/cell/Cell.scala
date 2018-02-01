@@ -340,8 +340,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         case raw: State[_, _] => // not completed
           val newDep: NextDepRunnable[K, V] =
-            if (sequential) new NextSequentialDepRunnable(pool, this, other, valueCallback)
-            else new NextConcurrentDepRunnable(pool, this, other, valueCallback)
+            if (sequential) new UnconditionalNextSequentialDepRunnable(pool, this, other, valueCallback)
+            else new UnconditionalNextConcurrentDepRunnable(pool, this, other, valueCallback)
 
           val current = raw.asInstanceOf[State[K, V]]
           val depRegistered =
@@ -598,7 +598,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   // Schedules execution of `callback` when next intermediate result is available.
   override private[cell] def onNext[U](callback: Try[V] => U): Unit = {
-    val runnable = new NextConcurrentCallbackRunnable[K, V](pool, null, this, callback) // NULL indicates that no cell is waiting for this callback.
+    val runnable = new NextConcurrentUnconditionalCallbackRunnable[K, V](pool, null, this, callback) // NULL indicates that no cell is waiting for this callback.
     dispatchOrAddNextCallback(runnable)
   }
 

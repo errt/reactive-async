@@ -2165,6 +2165,7 @@ class BaseSuite extends FunSuite {
 
     val cell1 = completer1.cell
     cell1.whenNextSequential(completer2.cell, (x: Int) => {
+
       assert(runningCallbacks.incrementAndGet() == 1)
       Thread.`yield`()
       try {
