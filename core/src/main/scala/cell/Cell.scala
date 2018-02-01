@@ -58,6 +58,8 @@ trait Cell[K <: Key[V], V] {
    */
   def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
   def whenNextSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
+  def whenNext(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit
+  def whenNextSequential(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit
 
   /**
    * Adds a dependency on some `other` cell.
@@ -325,11 +327,58 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     this.whenNext(other, valueCallback, sequential = false)
   }
 
+  /**
+    * Adds dependency on `other` cell: when `other` cell receives an intermediate result by using
+    *  `putNext`, evaluate `pred` with the result of `other`. If this evaluation yields `WhenNext`
+    *  or `WhenNextComplete`, `this` cell receives an intermediate or a final result `v`
+    *  respectively. To calculate `v`, the `valueCallback` function is called with the result of `other`.
+    *
+    *  If `v` is `Some(v)`, then the shortcut value is `v`. Otherwise if `value` is `None`,
+    *  the cell is not updated.
+    *
+    *  The thereby introduced dependency is removed when `this` cell
+    *  is completed (either prior or after an invocation of `whenNext`).
+    *
+    *  The `valueCallback` is guaranteed to not be called concurrently.
+    */
+  override def whenNextSequential(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit = {
+    this.whenNext(other, valueCallback, sequential = true, Some(threshold))
+  }
+
+  /**
+    * Adds dependency on `other` cell: when `other` cell receives an intermediate result by using
+    *  `putNext`, evaluate `pred` with the result of `other`. If this evaluation yields `WhenNext`
+    *  or `WhenNextComplete`, `this` cell receives an intermediate or a final result `v`
+    *  respectively. To calculate `v`, the `valueCallback` function is called with the result of `other`.
+    *
+    *  If `v` is `Some(v)`, then the shortcut value is `v`. Otherwise if `value` is `None`,
+    *  the cell is not updated.
+    *
+    *  The thereby introduced dependency is removed after it has been executed once.
+    */
+  override def whenNext(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit = {
+    this.whenNext(other, valueCallback, sequential = false, Some(threshold))
+  }
+
+  /**
+    * Adds dependency on `other` cell: when `other` cell receives an intermediate result by using
+    *  `putNext`, evaluate `pred` with the result of `other`. If this evaluation yields `WhenNext`
+    *  or `WhenNextComplete`, `this` cell receives an intermediate or a final result `v`
+    *  respectively. To calculate `v`, the `valueCallback` function is called with the result of `other`.
+    *
+    *  If `v` is `Some(v)`, then the shortcut value is `v`. Otherwise if `value` is `None`,
+    *  the cell is not updated.
+    *
+    *  The thereby introduced dependency is removed when `this` cell
+    *  is completed (either prior or after an invocation of `whenNext`).
+    *
+    *  The thereby introduced dependency is removed after it has been executed once.
+    */
   override def whenNextSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
     this.whenNext(other, valueCallback, sequential = true)
   }
 
-  private def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean): Unit = {
+  private def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean, threshold: Option[V] = None): Unit = {
     var success = false
     while (!success) {
       state.get() match {
@@ -340,8 +389,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         case raw: State[_, _] => // not completed
           val newDep: NextDepRunnable[K, V] =
-            if (sequential) new UnconditionalNextSequentialDepRunnable(pool, this, other, valueCallback)
-            else new UnconditionalNextConcurrentDepRunnable(pool, this, other, valueCallback)
+            if (sequential)
+              if (threshold.isEmpty) new UnconditionalNextSequentialDepRunnable(pool, this, other, valueCallback)
+              else new ThresholdNextSequentialDepRunnalbe(pool, this, other, threshold.get, valueCallback)
+
+            else
+              if (threshold.isEmpty) new UnconditionalNextConcurrentDepRunnable(pool, this, other, valueCallback)
+            else new ThresholdNextConcurrentDepRunnalbe(pool, this, other, threshold.get, valueCallback)
 
           val current = raw.asInstanceOf[State[K, V]]
           val depRegistered =
