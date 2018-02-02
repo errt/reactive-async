@@ -391,11 +391,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           val newDep: NextDepRunnable[K, V] =
             if (sequential)
               if (threshold.isEmpty) new UnconditionalNextSequentialDepRunnable(pool, this, other, valueCallback)
-              else new ThresholdNextSequentialDepRunnalbe(pool, this, other, threshold.get, valueCallback)
+              else new ThresholdNextSequentialDepRunnalbe(pool, this, other, threshold.get, valueCallback)(lattice)
 
             else
               if (threshold.isEmpty) new UnconditionalNextConcurrentDepRunnable(pool, this, other, valueCallback)
-            else new ThresholdNextConcurrentDepRunnalbe(pool, this, other, threshold.get, valueCallback)
+            else new ThresholdNextConcurrentDepRunnalbe(pool, this, other, threshold.get, valueCallback)(lattice)
 
           val current = raw.asInstanceOf[State[K, V]]
           val depRegistered =
@@ -494,13 +494,22 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             tryNewState(value)
           } else {
             // CAS was successful, so there was a point in time where `newVal` was in the cell
-            current.nextCallbacks.values.foreach { callbacks =>
-              callbacks.foreach(callback => callback.execute())
-            }
+            fireNextCallbacks(current.nextCallbacks, newState)
+
+
+
             true
           }
         } else true
     }
+  }
+
+  private def fireNextCallbacks(nextCallbacks: Map[Cell[K, V], List[NextCallbackRunnable[K, V]]], state: State[K, V]): Unit = {
+    val newNextCallbacks = nextCallbacks.values.map ({ callbacks =>
+      callbacks.filter(callback => callback.execute())
+    }).filter(_.nonEmpty)
+    val newState = new State(state.res, state.completeDeps, state.completeCallbacks, state.nextDeps, newNextCallbacks)
+    var success =
   }
 
   /**

@@ -45,7 +45,6 @@ private[cell] trait SingleShotRunnable[K <: Key[V], V] extends CallbackRunnable[
   val started = new AtomicBoolean(false)
 
   def run(): Unit = {
-    require(started.get() == false)
     if (started.compareAndSet(false, true))
       callback(Success(otherCell.getResult()))
   }
