@@ -89,11 +89,17 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * @param cell The cell.
    */
   def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
-    var success = false
-    while (!success) {
-      val registered = cellsNotDone.get()
+    val registered = cellsNotDone.get()
+    if (registered.contains(cell)) {
       val newRegistered = registered - cell
-      success = cellsNotDone.compareAndSet(registered, newRegistered)
+      if (cellsNotDone.compareAndSet(registered, newRegistered)) {
+        if (registered(cell).lengthCompare(1) > 0)
+          // Note that the first element of the queue is already running,
+          // so decSummittedTasks(1) will be called, when this element
+          // has been completed. The following elements won't be executed
+          // any more, so we can call decSubmittedTasks for them.
+          decSubmittedTasks(registered(cell).size - 1)
+      } else deregister(cell) // try deregister again
     }
   }
 
@@ -267,16 +273,17 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * Decrease the number of submitted tasks and run registered handlers, if quiescent.
    * Change the PoolState accordingly.
    */
-  private def decSubmittedTasks(): Unit = {
+  private def decSubmittedTasks(i: Int = 1): Unit = {
     var success = false
     var handlersToRun: Option[List[() => Unit]] = None
     while (!success) {
       val state = poolState.get()
-      if (state.submittedTasks > 1) {
+      val newNumberOfSubmittedTasks = state.submittedTasks - i
+      if (newNumberOfSubmittedTasks > 0) {
         handlersToRun = None
-        val newState = new PoolState(state.handlers, state.submittedTasks - 1)
+        val newState = new PoolState(state.handlers, newNumberOfSubmittedTasks)
         success = poolState.compareAndSet(state, newState)
-      } else if (state.submittedTasks == 1) {
+      } else if (newNumberOfSubmittedTasks == 0) {
         handlersToRun = Some(state.handlers)
         val newState = new PoolState()
         success = poolState.compareAndSet(state, newState)
