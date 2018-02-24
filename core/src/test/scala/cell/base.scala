@@ -513,8 +513,7 @@ class BaseSuite extends FunSuite {
     }
     cell1.onNext {
       case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
+        assert(false)
       case Failure(e) =>
         assert(false)
         latch.countDown()
@@ -1615,7 +1614,7 @@ class BaseSuite extends FunSuite {
           latch.countDown()
       }
 
-    pool.triggerExecution(cell1)
+//    pool.triggerExecution(cell1)
 
     // resolve cells
     val fut = pool.quiescentResolveCell
@@ -2350,8 +2349,9 @@ class BaseSuite extends FunSuite {
     val latch1 = new CountDownLatch(1)
     val latch2 = new CountDownLatch(1)
 
-    implicit val pool = new HandlerPool
+    val n = 10000
 
+    implicit val pool = new HandlerPool
     val completer1 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)(new lattice.NaturalNumberLattice, pool)
     val completer2 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)(new lattice.NaturalNumberLattice, pool)
     val cell1 = completer1.cell
@@ -2360,25 +2360,116 @@ class BaseSuite extends FunSuite {
 
     cell1.whenNextSequential(cell2, v => {
       latch1.await() // wait for some puts/triggers
-      FinalOutcome(10)
+      println("will now return with FinalOutcome")
+      FinalOutcome(n)
     })
 
-    completer2.putNext(1)
-    completer2.putNext(2)
-    completer2.putNext(10)
+    for (i <- 1 to n)
+      pool.execute(() => completer2.putNext(i))
     latch1.countDown()
+
+    println("latch 1 released")
 
     pool.onQuiescent(() => {
       pool.shutdown()
       latch2.countDown()
     })
     // pool needs to reach quiescence, even if cell1 is completed early:
+    println("wait for latch2 to be released")
     latch2.await()
 
-    assert(cell1.getResult() == 10)
-    assert(cell2.getResult() == 10)
+    assert(cell1.getResult() == n)
+    assert(cell2.getResult() == n)
     assert(cell1.isComplete)
     assert(!cell2.isComplete)
+  }
+
+  test("cell dependency on itself") {
+    class ReactivePropertyStoreKey extends Key[Int] {
+      override def resolve[K <: Key[Int]](cells: Seq[Cell[K, Int]]): Seq[(Cell[K, Int], Int)] = {
+        println(s"resolve $cells")
+
+        println("cell1 putFinal 42")
+        /*
+        cells.head.completer.putFinal(42)
+
+        Seq.empty
+        */
+        Seq((cells.head, 42))
+      }
+
+      override def fallback[K <: Key[Int]](cells: Seq[Cell[K, Int]]): Seq[(Cell[K, Int], Int)] = {
+        println("fallback")
+        cells.map(cell ⇒ (cell, cell.getResult()))
+      }
+
+      override def toString = "ReactivePropertyStoreKey"
+    }
+
+    implicit val pool = new HandlerPool(parallelism = 1)
+    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer2 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val cell1 = completer1.cell
+    val cell2 = completer2.cell
+
+    val completer10 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer20 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val cell10 = completer10.cell
+    val cell20 = completer20.cell
+
+    println(s"cell1 $cell1")
+    println(s"cell2 $cell2")
+
+    completer2.putNext(1)
+    println("cell2 putNext 1")
+    println("cell2 whenNextSeq cell1")
+    cell2.whenNext(cell1, x => {
+      println("other")
+      if (x == 42) {
+        completer2.putFinal(43)
+        println("cell2 putFinal 43")
+      }
+      NoOutcome
+    })
+
+    completer20.putNext(1)
+    println("cell20 putNext 1")
+    println("cell20 whenNextSeq cell10")
+    cell20.whenNext(cell10, x => {
+      println("other0")
+      if (x == 10) {
+        completer20.putFinal(43)
+        println("cell20 putFinal 43")
+      }
+      NoOutcome
+    })
+
+    println("cell1 putNext 10")
+    completer1.putNext(10)
+
+    println("cell10 putFinal 10")
+    completer10.putNext(10)
+
+    println("cell1 whenNextSeq cell1")
+    cell1.whenNext(cell1, _ => {
+      println("itself")
+      NoOutcome
+    })
+
+    cell1.trigger()
+    cell2.trigger()
+    cell10.trigger()
+    cell20.trigger()
+
+    val fut = pool.quiescentResolveCycles
+    Await.ready(fut, 2.seconds)
+
+    println("cycles resolved")
+
+    val fut2 = pool.quiescentResolveDefaults
+    Await.ready(fut2, 2.seconds)
+
+    println("defaults resolved")
   }
 
   test("whenCompleteSequential: discard callbacks on completion") {

@@ -1,16 +1,19 @@
 package cell
 
 import java.util.concurrent.ForkJoinPool
+import scala.concurrent.ExecutionContext.Implicits.global
 import java.util.concurrent.atomic.AtomicReference
-
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.{ Await, Future, Promise }
 import scala.concurrent.duration._
+
+
 import lattice.{ DefaultKey, Key, Lattice }
 import org.opalj.graphs._
 
 import scala.collection.immutable.Queue
+import scala.util.{Failure, Success}
 
 /* Need to have reference equality for CAS.
  */
@@ -138,7 +141,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (registered.nonEmpty) {
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
@@ -228,10 +231,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     for ((c, v) <- result) {
       cells.foreach(cell => {
         // Note that there is a better solution for this in https://github.com/phaller/reactive-async/pull/58
-        if (cell != c) {
+//        if (cell != c) {
           c.removeNextCallbacks(cell)
           c.removeCompleteCallbacks(cell)
-        }
+//        }
       })
       c.resolveWithValue(v)
     }
