@@ -55,6 +55,8 @@ private[cell] trait Threshold[K <: Key[V], V] extends SingleShotRunnable[K, V] {
   val lattice: Lattice[V]
 }
 
+private[cell] trait UnconditionalRunnable[K <: Key[V], V] extends CallbackRunnable[K, V]
+
 /**
  * Run a callback concurrently, if a value in a cell changes.
  * Call execute() to add the callback to the given HandlerPool.
@@ -67,7 +69,7 @@ private[cell] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackR
  * Run a callback concurrently, if a value in a cell changes.
  * Call execute() to add the callback to the given HandlerPool.
  */
-private[cell] trait ConcurrentUnconditionalCallbackRunnable[K <: Key[V], V] extends ConcurrentCallbackRunnable[K, V] {
+private[cell] trait ConcurrentUnconditionalCallbackRunnable[K <: Key[V], V] extends ConcurrentCallbackRunnable[K, V] with UnconditionalRunnable[K, V] {
   /** Add this CallbackRunnable to its handler pool such that it is run concurrently. */
   def execute(): Boolean = {
     try pool.execute(this)
@@ -105,7 +107,7 @@ private[cell] trait SequentialCallbackRunnable[K <: Key[V], V] extends CallbackR
  * Run a callback sequentially (for a dependent cell), if a value in another cell changes.
  * Call execute() to add the callback to the given HandlerPool.
  */
-private[cell] trait SequentialUnconditionalCallbackRunnable[K <: Key[V], V] extends SequentialCallbackRunnable[K, V] {
+private[cell] trait SequentialUnconditionalCallbackRunnable[K <: Key[V], V] extends SequentialCallbackRunnable[K, V] with UnconditionalRunnable[K, V] {
 
   /**
    * Add this CallbackRunnable to its handler pool such that it is run sequentially.
@@ -246,7 +248,7 @@ private[cell] abstract class UnconditionalNextCallbackRunnable[K <: Key[V], V](
   override val dependentCell: Cell[K, V], // needed to not call whenNext callback, if whenComplete callback exists.
   override val otherCell: Cell[K, V],
   override val callback: Try[V] => Any)
-  extends NextCallbackRunnable(pool, dependentCell, otherCell, callback) with MultiShotRunnalbe[K, V] {
+  extends NextCallbackRunnable(pool, dependentCell, otherCell, callback) with MultiShotRunnalbe[K, V] with UnconditionalRunnable[K, V] {
 }
 
 /**
