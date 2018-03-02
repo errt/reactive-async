@@ -11,14 +11,14 @@ class PsSuite extends FunSuite {
   implicit val stringIntLattice: Lattice[Int] = new StringIntLattice
 
   test("cell dependency on itself whenNextSequential") {
-    implicit val pool = new HandlerPool(parallelism = 1)
+    implicit val pool = new HandlerPool
     val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell1 = completer1.cell
 
     cell1.trigger()
     completer1.putNext(10)
 
-    cell1.whenNextSequential(cell1, _ => { // TODO test with wNSeq!
+    cell1.whenNextSequential(cell1, _ => {
       NoOutcome
     })
 
@@ -79,12 +79,6 @@ class PsSuite extends FunSuite {
 
   class ReactivePropertyStoreKey extends Key[Int] {
     override def resolve[K <: Key[Int]](cells: Seq[Cell[K, Int]]): Seq[(Cell[K, Int], Int)] = {
-      println(s"resolve $cells")
-
-      println("cell1 putFinal 42")
-//      cells.head.completer.putFinal(42)
-//
-//      Seq.empty
       cells.map((_, 42))
     }
 
@@ -94,6 +88,22 @@ class PsSuite extends FunSuite {
     }
 
     override def toString = "ReactivePropertyStoreKey"
+  }
+
+  test("cell dependency on itself whenNextSequential using fallback only") {
+    implicit val pool = new HandlerPool(parallelism = 8)
+    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val cell1 = completer1.cell
+
+    cell1.trigger()
+    completer1.putNext(10)
+
+    cell1.whenNextSequential(cell1, _ => {
+      NoOutcome
+    })
+
+    val fut = pool.quiescentResolveDefaults
+    Await.ready(fut, 2.seconds)
   }
 
 }

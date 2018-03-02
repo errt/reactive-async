@@ -652,6 +652,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, lattice: L
           case false => new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks + (runnable.dependentCell -> List(runnable)))
         }
         if (!state.compareAndSet(pre, newState)) dispatchOrAddNextCallback(runnable)
+        else if (pre.res != lattice.empty) runnable.execute()
     }
   }
 

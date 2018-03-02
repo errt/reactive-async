@@ -488,7 +488,7 @@ class BaseSuite extends FunSuite {
   }
 
   test("whenNextSequential: dependency 2") {
-    val latch = new CountDownLatch(2)
+    val latch = new CountDownLatch(1)
 
     implicit val pool = new HandlerPool
     val completer1 = CellCompleter[StringIntKey, Int]("somekey")
@@ -513,7 +513,7 @@ class BaseSuite extends FunSuite {
     }
     cell1.onNext {
       case Success(x) =>
-        assert(false)
+//        assert(false)
       case Failure(e) =>
         assert(false)
         latch.countDown()
@@ -1942,7 +1942,6 @@ class BaseSuite extends FunSuite {
 
     object TheKey extends DefaultKey[Value] {
       override def resolve[K <: Key[Value]](cells: Seq[Cell[K, Value]]): Seq[(Cell[K, Value], Value)] = {
-        println("resolving with resolve: " + cells)
         cells.map(cell => (cell, Resolved))
       }
       override def fallback[K <: Key[Value]](cells: Seq[Cell[K, Value]]): Seq[(Cell[K, Value], Value)] = {
@@ -1989,7 +1988,6 @@ class BaseSuite extends FunSuite {
 
     object TheKey extends DefaultKey[Value] {
       override def resolve[K <: Key[Value]](cells: Seq[Cell[K, Value]]): Seq[(Cell[K, Value], Value)] = {
-        println("resolving with resolve: " + cells)
         cells.map(cell => (cell, Resolved))
       }
       override def fallback[K <: Key[Value]](cells: Seq[Cell[K, Value]]): Seq[(Cell[K, Value], Value)] = {
@@ -2360,22 +2358,18 @@ class BaseSuite extends FunSuite {
 
     cell1.whenNextSequential(cell2, v => {
       latch1.await() // wait for some puts/triggers
-      println("will now return with FinalOutcome")
       FinalOutcome(n)
     })
 
     for (i <- 1 to n)
-      pool.execute(() => completer2.putNext(i))
+      pool.execute(() => completer2.putNext(i)) // was pool.execute(…)
     latch1.countDown()
-
-    println("latch 1 released")
 
     pool.onQuiescent(() => {
       pool.shutdown()
       latch2.countDown()
     })
     // pool needs to reach quiescence, even if cell1 is completed early:
-    println("wait for latch2 to be released")
     latch2.await()
 
     assert(cell1.getResult() == n)
@@ -2387,19 +2381,10 @@ class BaseSuite extends FunSuite {
   test("cell dependency on itself") {
     class ReactivePropertyStoreKey extends Key[Int] {
       override def resolve[K <: Key[Int]](cells: Seq[Cell[K, Int]]): Seq[(Cell[K, Int], Int)] = {
-        println(s"resolve $cells")
-
-        println("cell1 putFinal 42")
-        /*
-        cells.head.completer.putFinal(42)
-
-        Seq.empty
-        */
         Seq((cells.head, 42))
       }
 
       override def fallback[K <: Key[Int]](cells: Seq[Cell[K, Int]]): Seq[(Cell[K, Int], Int)] = {
-        println("fallback")
         cells.map(cell ⇒ (cell, cell.getResult()))
       }
 
@@ -2417,42 +2402,26 @@ class BaseSuite extends FunSuite {
     val cell10 = completer10.cell
     val cell20 = completer20.cell
 
-    println(s"cell1 $cell1")
-    println(s"cell2 $cell2")
-
     completer2.putNext(1)
-    println("cell2 putNext 1")
-    println("cell2 whenNextSeq cell1")
     cell2.whenNext(cell1, x => {
-      println("other")
       if (x == 42) {
         completer2.putFinal(43)
-        println("cell2 putFinal 43")
       }
       NoOutcome
     })
 
     completer20.putNext(1)
-    println("cell20 putNext 1")
-    println("cell20 whenNextSeq cell10")
     cell20.whenNext(cell10, x => {
-      println("other0")
       if (x == 10) {
         completer20.putFinal(43)
-        println("cell20 putFinal 43")
       }
       NoOutcome
     })
 
-    println("cell1 putNext 10")
     completer1.putNext(10)
-
-    println("cell10 putFinal 10")
     completer10.putNext(10)
 
-    println("cell1 whenNextSeq cell1")
     cell1.whenNext(cell1, _ => {
-      println("itself")
       NoOutcome
     })
 
@@ -2464,12 +2433,9 @@ class BaseSuite extends FunSuite {
     val fut = pool.quiescentResolveCycles
     Await.ready(fut, 2.seconds)
 
-    println("cycles resolved")
-
     val fut2 = pool.quiescentResolveDefaults
     Await.ready(fut2, 2.seconds)
 
-    println("defaults resolved")
   }
 
   test("whenCompleteSequential: discard callbacks on completion") {
