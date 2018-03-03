@@ -391,11 +391,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           val newDep: NextDepRunnable[K, V] =
             if (sequential)
               if (threshold.isEmpty) new UnconditionalNextSequentialDepRunnable(pool, this, other, valueCallback)
-              else new ThresholdNextSequentialDepRunnalbe(pool, this, other, threshold.get, valueCallback)(lattice)
+              else new ThresholdNextSequentialDepRunnalbe(pool, this, other, threshold.get, valueCallback)(updater.partialOrdering)
 
             else
               if (threshold.isEmpty) new UnconditionalNextConcurrentDepRunnable(pool, this, other, valueCallback)
-            else new ThresholdNextConcurrentDepRunnalbe(pool, this, other, threshold.get, valueCallback)(lattice)
+            else new ThresholdNextConcurrentDepRunnalbe(pool, this, other, threshold.get, valueCallback)(updater.partialOrdering)
 
           val current = raw.asInstanceOf[State[K, V]]
           val depRegistered =
@@ -726,7 +726,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case false => new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks + (runnable.dependentCell -> List(runnable)))
         }
         if (!state.compareAndSet(pre, newState)) dispatchOrAddNextCallback(runnable)
-        else if (current.res != lattice.empty) runnable.execute()
+        else if (current.res != updater.bottom) runnable.execute()
     }
   }
 

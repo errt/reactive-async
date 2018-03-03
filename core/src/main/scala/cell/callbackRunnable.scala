@@ -52,7 +52,7 @@ private[cell] trait SingleShotRunnable[K <: Key[V], V] extends CallbackRunnable[
 
 private[cell] trait Threshold[K <: Key[V], V] extends SingleShotRunnable[K, V] {
   val threshold: V
-  val lattice: Lattice[V]
+  val ordering: PartialOrdering[V]
 }
 
 private[cell] trait UnconditionalRunnable[K <: Key[V], V] extends CallbackRunnable[K, V]
@@ -85,7 +85,7 @@ private[cell] trait ConcurrentUnconditionalCallbackRunnable[K <: Key[V], V] exte
 private[cell] trait ConcurrentThresholdCallbackRunnable[K <: Key[V], V] extends ConcurrentCallbackRunnable[K, V] with Threshold[K, V] {
   /** Add this CallbackRunnable to its handler pool such that it is run concurrently. */
   def execute(): Boolean = {
-    if (lattice.gteq(otherCell.getResult(), threshold)) {
+    if (ordering.gteq(otherCell.getResult(), threshold)) {
       try pool.execute(this)
       catch {
         case NonFatal(t) => pool reportFailure t
@@ -124,7 +124,7 @@ private[cell] trait SequentialThresholdCallbackRunnable[K <: Key[V], V] extends 
    * All SequentialCallbackRunnables with the same `dependentCell` are executed sequentially.
    */
   def execute(): Boolean = {
-    if (lattice.gteq(otherCell.getResult(), threshold)) {
+    if (ordering.gteq(otherCell.getResult(), threshold)) {
       pool.scheduleSequentialCallback(this)
       true
     } else false
@@ -329,7 +329,7 @@ private[cell] class ThresholdNextConcurrentDepRunnalbe[K <: Key[V], V](
   override val dependentCompleter: CellCompleter[K, V],
   override val otherCell: Cell[K, V],
   override val threshold: V,
-  override val valueCallback: V => Outcome[V])(implicit override val lattice: Lattice[V])
+  override val valueCallback: V => Outcome[V])(implicit override val ordering: PartialOrdering[V])
   extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with ConcurrentThresholdCallbackRunnable[K, V]
 
 private[cell] class ThresholdNextSequentialDepRunnalbe[K <: Key[V], V](
@@ -337,5 +337,5 @@ private[cell] class ThresholdNextSequentialDepRunnalbe[K <: Key[V], V](
   override val dependentCompleter: CellCompleter[K, V],
   override val otherCell: Cell[K, V],
   override val threshold: V,
-  override val valueCallback: V => Outcome[V])(implicit override val lattice: Lattice[V])
+  override val valueCallback: V => Outcome[V])(implicit override val ordering: PartialOrdering[V])
   extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with SequentialThresholdCallbackRunnable[K, V]

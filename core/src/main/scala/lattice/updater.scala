@@ -4,6 +4,7 @@ trait Updater[V] {
   this: PartialOrderingWithBottom[V] =>
 
   def bottom: V
+  def partialOrdering: PartialOrderingWithBottom[V] = this
   def update(current: V, next: V): V
 }
 
