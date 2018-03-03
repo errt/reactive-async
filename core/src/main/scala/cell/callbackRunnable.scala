@@ -61,9 +61,7 @@ private[cell] trait UnconditionalRunnable[K <: Key[V], V] extends CallbackRunnab
  * Run a callback concurrently, if a value in a cell changes.
  * Call execute() to add the callback to the given HandlerPool.
  */
-private[cell] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
-
-}
+private[cell] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V]
 
 /**
  * Run a callback concurrently, if a value in a cell changes.
@@ -101,7 +99,7 @@ private[cell] trait ConcurrentThresholdCallbackRunnable[K <: Key[V], V] extends 
  * Run a callback sequentially (for a dependent cell), if a value in another cell changes.
  * Call execute() to add the callback to the given HandlerPool.
  */
-private[cell] trait SequentialCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {}
+private[cell] trait SequentialCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V]
 
 /**
  * Run a callback sequentially (for a dependent cell), if a value in another cell changes.

@@ -494,9 +494,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             tryNewState(value)
           } else {
             // CAS was successful, so there was a point in time where `newVal` was in the cell
-            fireNextCallbacks(current.nextCallbacks, newState)
-
-
+            fireNextCallbacks(current.nextCallbacks)
 
             true
           }
@@ -504,12 +502,31 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  private def fireNextCallbacks(nextCallbacks: Map[Cell[K, V], List[NextCallbackRunnable[K, V]]], state: State[K, V]): Unit = {
-    val newNextCallbacks = nextCallbacks.values.map ({ callbacks =>
-      callbacks.filter(callback => callback.execute())
-    }).filter(_.nonEmpty)
-    val newState = new State(state.res, state.tasksActive, state.completeDeps, state.completeCallbacks, state.nextDeps, newNextCallbacks)
-    var success = state.
+  private def fireNextCallbacks(nextCallbacks: Map[Cell[K, V], List[NextCallbackRunnable[K, V]]]): Unit = {
+    // trigger all callbacks and store those that stay valid
+    val newCallbackMap: Map[Cell[K, V], List[NextCallbackRunnable[K, V]]] = nextCallbacks.map {
+      case (cell, list) =>
+        (cell, list.filter(callback => callback.execute()))
+    } .filter(_._2.nonEmpty)
+
+    // store those callbacks in the state
+    var success = false
+    do
+      state.get() match {
+        case _: Try[_] => success = true
+        case raw: State[_, _] =>
+          val cur = raw.asInstanceOf[State[K, V]]
+          val newStateWithNewCallbacks = new State(cur.res, cur.tasksActive, cur.completeDeps, cur.completeCallbacks, cur.nextDeps, newCallbackMap)
+          success = state.compareAndSet(cur, newStateWithNewCallbacks)
+    } while (!success)
+
+    // Note: This implementation might lead to runnable.run() being invoked concurrently.
+    // In this case run() itself will only call the callback once, if it is a SingleShotRunnable.
+    //
+    // Alternativly, one could prompt each runnable if it "will" stay valid if invoked with a given value.
+    // Then one could extract those, CAS without the extracted ones and, if CAS is successful, call the extracted.
+    // But: We would have to fix the value to call the callbacks with prematurely, which could
+    // lead to more subsequent callback invokations.
   }
 
   /**
@@ -542,9 +559,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         res
 
       case (pre: State[K, V], newVal: Try[V]) =>
-        pre.nextCallbacks.values.foreach { callbacks =>
-          callbacks.foreach(callback => callback.execute())
-        }
+        fireNextCallbacks(pre.nextCallbacks)
         pre.completeCallbacks.values.foreach { callbacks =>
           callbacks.foreach(callback => callback.execute())
         }
