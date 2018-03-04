@@ -19,7 +19,6 @@ package cell
  * (3) called concurrently         vs.   called sequentially
  * (4) called unconditionlly       vs.   called if threshold is crossed
  * (5) called for every update     vs.   called on completion only
- * (6) propagate the latest value  vs.   propagate a fixed value
  *
  * The implementation of those differences is as follows:
  *
@@ -51,7 +50,7 @@ package cell
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-import lattice.{Key, PartialOrderingWithBottom}
+import lattice.Key
 
 import scala.concurrent.OnCompleteRunnable
 import scala.util.control.NonFatal
@@ -93,6 +92,10 @@ private[cell] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnCom
   override def run(): Unit
 }
 
+/*
+ * (2) called at most once vs. called repeatedly
+ */
+
 private[cell] trait MultiShotRunnalbe[K <: Key[V], V] extends CallbackRunnable[K, V] {
   def run(): Unit = {
     callback(Success(value()))
@@ -108,6 +111,9 @@ private[cell] trait SingleShotRunnable[K <: Key[V], V] extends CallbackRunnable[
   }
 }
 
+/*
+ * (4) called unconditionlly vs. called if threshold is crossed
+ */
 private trait Threshold[K <: Key[V], V] extends SingleShotRunnable[K, V] {
   val thresholds: Set[V]
   val ordering: PartialOrdering[V]
@@ -138,6 +144,10 @@ private[cell] trait UnconditionalRunnable[K <: Key[V], V] extends CallbackRunnab
   }
 }
 
+/*
+ * (3) called concurrently vs. called sequentially
+ */
+
 /**
  * Run a callback concurrently, if a value in a cell changes.
  * Call execute() to add the callback to the given HandlerPool.
@@ -153,18 +163,6 @@ private[cell] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackR
 }
 
 /**
- * Run a callback concurrently, if a value in a cell changes.
- * Call execute() to add the callback to the given HandlerPool.
- */
-private[cell] trait ConcurrentUnconditionalCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] with ConcurrentCallbackRunnable[K, V] with UnconditionalRunnable[K, V]
-
-/**
- * Run a callback concurrently, if a value in a cell changes.
- * Call execute() to add the callback to the given HandlerPool.
- */
-private[cell] trait ConcurrentThresholdCallbackRunnable[K <: Key[V], V] extends SingleShotRunnable[K, V] with ConcurrentCallbackRunnable[K, V] with Threshold[K, V]
-
-/**
  * Run a callback sequentially (for a dependent cell), if a value in another cell changes.
  * Call execute() to add the callback to the given HandlerPool.
  */
@@ -178,19 +176,9 @@ private[cell] trait SequentialCallbackRunnable[K <: Key[V], V] extends CallbackR
   }
 }
 
-/**
- * Run a callback sequentially (for a dependent cell), if a value in another cell changes.
- * Call execute() to add the callback to the given HandlerPool.
+/*
+ * (1) dependecy callback (when*) vs. event handler callback (onnext, oncomplete)
  */
-private[cell] trait SequentialUnconditionalCallbackRunnable[K <: Key[V], V]
-  extends CallbackRunnable[K, V]
-    with SequentialCallbackRunnable[K, V]
-    with UnconditionalRunnable[K, V]
-
-private[cell] trait SequentialThresholdCallbackRunnable[K <: Key[V], V]
-  extends SingleShotRunnable[K, V]
-    with SequentialCallbackRunnable[K, V]
-    with Threshold[K, V]
 
 /**
  * A dependency between to cells consisting of a dependent cell(completer),
@@ -222,8 +210,7 @@ private[cell] class CompleteConcurrentCallbackRunnable[K <: Key[V], V](
     override val dependentCell: Cell[K, V],
     override val otherCell: Cell[K, V],
     override val callback: Try[V] => Any)
-  extends CompleteCallbackRunnable[K, V](pool, dependentCell, otherCell, callback) with ConcurrentUnconditionalCallbackRunnable[K, V] {
-}
+  extends CompleteCallbackRunnable[K, V](pool, dependentCell, otherCell, callback) with ConcurrentCallbackRunnable[K, V] with UnconditionalRunnable[K, V]
 
 /**
  * Dependency between `dependentCompleter` and `otherCell`.
@@ -270,7 +257,7 @@ private[cell] class CompleteConcurrentDepRunnable[K <: Key[V], V](
   override val otherCell: Cell[K, V],
   override val valueCallback: V => Outcome[V])
   extends CompleteDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback)
-  with ConcurrentUnconditionalCallbackRunnable[K, V] {
+  with ConcurrentCallbackRunnable[K, V] with UnconditionalRunnable[K, V]  {
 }
 
 /**
@@ -287,7 +274,7 @@ private[cell] class CompleteSequentialDepRunnable[K <: Key[V], V](
   override val otherCell: Cell[K, V],
   override val valueCallback: V => Outcome[V])
   extends CompleteDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback)
-  with SequentialUnconditionalCallbackRunnable[K, V] {
+  with SequentialCallbackRunnable[K, V] with UnconditionalRunnable[K, V] {
 }
 
 /**
@@ -306,14 +293,6 @@ private[cell] abstract class NextCallbackRunnable[K <: Key[V], V](
   extends CallbackRunnable[K, V] {
 }
 
-private[cell] abstract class UnconditionalNextCallbackRunnable[K <: Key[V], V](
-  override val pool: HandlerPool,
-  override val dependentCell: Cell[K, V], // needed to not call whenNext callback, if whenComplete callback exists.
-  override val otherCell: Cell[K, V],
-  override val callback: Try[V] => Any)
-  extends NextCallbackRunnable(pool, dependentCell, otherCell, callback) with MultiShotRunnalbe[K, V] with UnconditionalRunnable[K, V] {
-}
-
 /**
  * @param pool          The handler pool that runs the callback function
  * @param dependentCell The cell, that depends on `otherCell`.
@@ -321,11 +300,14 @@ private[cell] abstract class UnconditionalNextCallbackRunnable[K <: Key[V], V](
  * @param callback      Callback function that is triggered on an onNext event
  */
 private[cell] class NextConcurrentUnconditionalCallbackRunnable[K <: Key[V], V](
-  override val pool: HandlerPool,
-  override val dependentCell: Cell[K, V],
-  override val otherCell: Cell[K, V],
-  override val callback: Try[V] => Any)
-  extends UnconditionalNextCallbackRunnable[K, V](pool, dependentCell, otherCell, callback) with ConcurrentUnconditionalCallbackRunnable[K, V] {
+     override val pool: HandlerPool,
+     override val dependentCell: Cell[K, V],
+     override val otherCell: Cell[K, V],
+     override val callback: Try[V] => Any)
+  extends NextCallbackRunnable[K, V](pool, dependentCell, otherCell, callback)
+    with UnconditionalRunnable[K, V]
+    with MultiShotRunnalbe[K, V]
+    with ConcurrentCallbackRunnable[K, V] {
 }
 
 /**
@@ -371,7 +353,11 @@ private[cell] class UnconditionalNextConcurrentDepRunnable[K <: Key[V], V](
   override val pool: HandlerPool,
   override val dependentCompleter: CellCompleter[K, V],
   override val otherCell: Cell[K, V],
-  override val valueCallback: V => Outcome[V]) extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with ConcurrentUnconditionalCallbackRunnable[K, V] with MultiShotRunnalbe[K, V] {
+  override val valueCallback: V => Outcome[V])
+  extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback)
+  with ConcurrentCallbackRunnable[K, V]
+  with UnconditionalRunnable[K, V]
+  with MultiShotRunnalbe[K, V] {
 }
 
 /**
@@ -386,7 +372,11 @@ private[cell] class UnconditionalNextSequentialDepRunnable[K <: Key[V], V](
   override val pool: HandlerPool,
   override val dependentCompleter: CellCompleter[K, V],
   override val otherCell: Cell[K, V],
-  override val valueCallback: V => Outcome[V]) extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with SequentialUnconditionalCallbackRunnable[K, V] with MultiShotRunnalbe[K, V] {
+  override val valueCallback: V => Outcome[V])
+  extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback)
+    with SequentialCallbackRunnable[K, V]
+    with UnconditionalRunnable[K, V]
+    with MultiShotRunnalbe[K, V] {
 }
 
 private[cell] class ThresholdNextConcurrentDepRunnalbe[K <: Key[V], V](
@@ -395,7 +385,9 @@ private[cell] class ThresholdNextConcurrentDepRunnalbe[K <: Key[V], V](
   override val otherCell: Cell[K, V],
   override val thresholds: Set[V],
   override val valueCallback: V => Outcome[V])(implicit override val ordering: PartialOrdering[V])
-  extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with ConcurrentThresholdCallbackRunnable[K, V]
+  extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback)
+  with ConcurrentCallbackRunnable[K, V]
+  with Threshold[K, V]
 
 private[cell] class ThresholdNextSequentialDepRunnalbe[K <: Key[V], V](
   override val pool: HandlerPool,
@@ -403,4 +395,6 @@ private[cell] class ThresholdNextSequentialDepRunnalbe[K <: Key[V], V](
   override val otherCell: Cell[K, V],
   override val thresholds: Set[V],
   override val valueCallback: V => Outcome[V])(implicit override val ordering: PartialOrdering[V])
-  extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with SequentialThresholdCallbackRunnable[K, V]
+  extends NextDepRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback)
+    with SequentialCallbackRunnable[K, V]
+  with Threshold[K, V]
