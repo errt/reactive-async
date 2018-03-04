@@ -32,8 +32,6 @@ object Updater {
       override def lteq(x: T, y: T): Boolean = partialOrderingWithBottom.lteq(x, y)
     }
 
-  //  def pair[T](implicit lattice: Lattice[T]): Updater[(T, T)] = latticeToUpdater(Lattice.pair(lattice))
-
   def pair[T](implicit updater: Updater[T]): Updater[(T, T)] = new Updater[(T, T)] with PartialOrderingWithBottom[(T, T)] {
     override def update(current: (T, T), next: (T, T)): (T, T) =
       (updater.update(current._1, next._1), updater.update(current._2, next._2))

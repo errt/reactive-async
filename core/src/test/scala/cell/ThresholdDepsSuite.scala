@@ -21,7 +21,7 @@ class ThresholdDepsSuite extends FunSuite {
     val completer2 = CellCompleter[NaturalNumberKey.type, Int](NaturalNumberKey, _ => NoOutcome)
     val cell2 = completer2.cell
 
-    cell1.whenNext(cell2, 5, FinalOutcome(_))
+    cell1.whenNext(cell2, Set(5), FinalOutcome(_))
     completer2.putNext(5)
 
     latch.await()
@@ -41,10 +41,12 @@ class ThresholdDepsSuite extends FunSuite {
     val completer2 = CellCompleter[NaturalNumberKey.type, Int](NaturalNumberKey, _ => NoOutcome)
     val cell2 = completer2.cell
 
-    cell1.whenNext(cell2, 5, FinalOutcome(_))
+    cell1.whenNext(cell2, Set(5), FinalOutcome(_))
     completer2.putNext(6)
 
     latch.await()
+
+    assert(cell1.getResult() === 5) // only threshold value is propagated
 
     pool.shutdown()
   }
@@ -71,7 +73,7 @@ class ThresholdDepsSuite extends FunSuite {
 
     cell1.trigger() //otherwise, cell would not get resolved
     completer1.putNext(2) // cell1 will be resolved with 10 via the NaturalNumberKey
-    cell1.whenNext(cell2, 5, FinalOutcome(_)) // add a thresholded dependency
+    cell1.whenNext(cell2, Set(5), FinalOutcome(_)) // add a thresholded dependency
     completer2.putNext(4) // this put should not trigger the dependency callback
 
     val fut = pool.quiescentResolveCell // resolve the cells
@@ -97,7 +99,7 @@ class ThresholdDepsSuite extends FunSuite {
     cell1.onComplete {
       // this should only be called, when the cell is resolved by its key
       case Success(v) =>
-        assert(v === 6)
+        assert(v === 5)
         latch.countDown()
       case Failure(_) =>
         fail()
@@ -106,7 +108,7 @@ class ThresholdDepsSuite extends FunSuite {
     cell1.onNext {
       // this should only be called once via the dep (and a second time via the key)
       case Success(v) =>
-        assert(v === 6)
+        assert(v === 5)
         latch2.countDown()
       case Failure(_) =>
         fail()
@@ -116,7 +118,7 @@ class ThresholdDepsSuite extends FunSuite {
     val cell2 = completer2.cell
 
     cell1.trigger() //otherwise, cell would not get resolved
-    cell1.whenNext(cell2, 5, FinalOutcome(_)) // add a thresholded dependency
+    cell1.whenNext(cell2, Set(5), FinalOutcome(_)) // add a thresholded dependency
     completer2.putNext(6) // this put should trigger the dependency callback
     latch2.await() // wait for the first callback to take effect
     completer2.putNext(7) // this put should not trigger the dependency callback any more
@@ -126,11 +128,10 @@ class ThresholdDepsSuite extends FunSuite {
 
     latch.await()
 
-    assert(cell1.getResult() === 6)
+    assert(cell1.getResult() === 5) // only threshold value is propagated
     assert(cell2.getResult() === 7)
 
     pool.shutdown()
   }
-
 
 }

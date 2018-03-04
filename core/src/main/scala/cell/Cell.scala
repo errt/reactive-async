@@ -58,8 +58,8 @@ trait Cell[K <: Key[V], V] {
    */
   def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
   def whenNextSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
-  def whenNext(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit
-  def whenNextSequential(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit
+  def whenNext(other: Cell[K, V], thresholds: Set[V], valueCallback: V => Outcome[V]): Unit
+  def whenNextSequential(other: Cell[K, V], thresholds: Set[V], valueCallback: V => Outcome[V]): Unit
 
   /**
    * Adds a dependency on some `other` cell.
@@ -341,8 +341,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     *
     *  The `valueCallback` is guaranteed to not be called concurrently.
     */
-  override def whenNextSequential(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit = {
-    this.whenNext(other, valueCallback, sequential = true, Some(threshold))
+  override def whenNextSequential(other: Cell[K, V], thresholds: Set[V], valueCallback: V => Outcome[V]): Unit = {
+    this.whenNext(other, valueCallback, sequential = true, Some(thresholds))
   }
 
   /**
@@ -356,8 +356,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     *
     *  The thereby introduced dependency is removed after it has been executed once.
     */
-  override def whenNext(other: Cell[K, V], threshold: V, valueCallback: V => Outcome[V]): Unit = {
-    this.whenNext(other, valueCallback, sequential = false, Some(threshold))
+  override def whenNext(other: Cell[K, V], thresholds: Set[V], valueCallback: V => Outcome[V]): Unit = {
+    this.whenNext(other, valueCallback, sequential = false, Some(thresholds))
   }
 
   /**
@@ -378,7 +378,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     this.whenNext(other, valueCallback, sequential = true)
   }
 
-  private def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean, threshold: Option[V] = None): Unit = {
+  private def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean, threshold: Option[Set[V]] = None): Unit = {
     var success = false
     while (!success) {
       state.get() match {
