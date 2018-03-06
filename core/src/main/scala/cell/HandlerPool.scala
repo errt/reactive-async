@@ -226,10 +226,16 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val key = cells.head.key
     val result = key.resolve(cells)
 
-    for ((c, v) <- result) {
-      c.removeAllCallbacks(cells)
-      c.resolveWithValue(v)
-    }
+    for ((c, v) <- result)
+      execute(new Runnable {
+        override def run(): Unit = {
+          // remove all callbacks that target other
+          // cells of this cycle
+          c.removeAllCallbacks(cells)
+          // we can now safely put a final value
+          c.resolveWithValue(v)
+        }
+      })
   }
 
   /**
@@ -239,10 +245,16 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val key = cells.head.key
     val result = key.fallback(cells)
 
-    for ((c, v) <- result) {
-      c.removeAllCallbacks(cells)
-      c.resolveWithValue(v)
-    }
+    for ((c, v) <- result)
+      execute(new Runnable {
+        override def run(): Unit = {
+          // remove all callbacks that target other
+          // cells of this cycle
+          c.removeAllCallbacks(cells)
+          // we can now safely put a final value
+          c.resolveWithValue(v)
+        }
+      })
   }
 
   /**
