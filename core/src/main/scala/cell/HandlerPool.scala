@@ -227,9 +227,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val result = key.resolve(cells)
 
     for ((c, v) <- result) {
-      cells.foreach(cell => {
-        c.removeAllCallbacks(cell)
-      })
+      c.removeAllCallbacks(cells)
       c.resolveWithValue(v)
     }
   }
@@ -242,9 +240,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val result = key.fallback(cells)
 
     for ((c, v) <- result) {
-      cells.foreach(cell => {
-        c.removeAllCallbacks(cell)
-      })
+      c.removeAllCallbacks(cells)
       c.resolveWithValue(v)
     }
   }

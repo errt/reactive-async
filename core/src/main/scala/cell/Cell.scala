@@ -112,6 +112,7 @@ trait Cell[K <: Key[V], V] {
   def removeCompleteCallbacks(cell: Cell[K, V]): Unit
   def removeNextCallbacks(cell: Cell[K, V]): Unit
   private[cell] def removeAllCallbacks(cell: Cell[K, V]): Unit
+  private[cell] def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit
 }
 
 object Cell {
@@ -480,12 +481,17 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         res
 
       case (pre: State[K, V], newVal: Try[V]) =>
-        pre.nextCallbacks.values.foreach { callbacks =>
-          callbacks.foreach(callback => callback.execute())
-        }
-        pre.completeCallbacks.values.foreach { callbacks =>
-          callbacks.foreach(callback => callback.execute())
-        }
+        val nextCallbacks = pre.nextCallbacks
+        val completeCallbacks = pre.completeCallbacks
+
+        if (nextCallbacks.nonEmpty)
+          nextCallbacks.values.foreach { callbacks =>
+            callbacks.foreach(callback => callback.execute())
+          }
+        if (completeCallbacks.nonEmpty)
+          completeCallbacks.values.foreach { callbacks =>
+            callbacks.foreach(callback => callback.execute())
+          }
 
         val depsCells = pre.completeDeps
         val nextDepsCells = pre.nextDeps
@@ -576,6 +582,21 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val newState = new State(current.res, current.tasksActive, current.completeDeps, newCompleteCallbacks, current.nextDeps, newNextCallbacks)
         if (!state.compareAndSet(current, newState))
           removeAllCallbacks(cell)
+      case _ => /* do nothing */
+    }
+  }
+
+  @tailrec
+  override private[cell] final def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit = {
+    state.get() match {
+      case pre: State[_, _] =>
+        val current = pre.asInstanceOf[State[K, V]]
+        val newNextCallbacks = current.nextCallbacks -- cells
+        val newCompleteCallbacks = current.completeCallbacks -- cells
+
+        val newState = new State(current.res, current.tasksActive, current.completeDeps, newCompleteCallbacks, current.nextDeps, newNextCallbacks)
+        if (!state.compareAndSet(current, newState))
+          removeAllCallbacks(cells)
       case _ => /* do nothing */
     }
   }
