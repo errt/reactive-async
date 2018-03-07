@@ -108,6 +108,7 @@ trait Cell[K <: Key[V], V] {
   private[cell] def resolveWithValue(value: V): Unit
   def cellDependencies: Seq[Cell[K, V]]
   def totalCellDependencies: Seq[Cell[K, V]]
+  def isIndependent(): Boolean
 
   def removeCompleteCallbacks(cell: Cell[K, V]): Unit
   def removeNextCallbacks(cell: Cell[K, V]): Unit
@@ -291,6 +292,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       case pre: State[_, _] => // not completed
         val current = pre.asInstanceOf[State[K, V]]
         (current.completeDeps ++ current.nextDeps).toSeq
+    }
+  }
+
+  override def isIndependent(): Boolean = {
+    state.get() match {
+      case finalRes: Try[_] => // completed with final result
+        true
+      case pre: State[_, _] => // not completed
+        val current = pre.asInstanceOf[State[K, V]]
+        current.completeDeps.isEmpty && current.nextDeps.isEmpty
     }
   }
 

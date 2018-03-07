@@ -169,7 +169,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().keys
+        .filter(_.tasksActive())
+        // TODO Should we add .filter(_.isIndepdent()) as in quiescenceResolveCycles? The semantics of this methods needs to be defined!
+        .asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
 
@@ -203,7 +206,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         resolvedCycles = cSCCs.nonEmpty
       }
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().keys.filter(_.tasksActive()).filter(_.numTotalDependencies == 0).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().keys
+        .filter(_.tasksActive())
+        .filter(_.isIndependent())
+        .asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -222,35 +228,24 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   /**
    * Resolves a cycle of unfinished cells.
    */
-  private def resolveCycle[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit = {
-    val key = cells.head.key
-    val result = key.resolve(cells)
-
-    for ((c, v) <- result)
-      execute(new Runnable {
-        override def run(): Unit = {
-          // remove all callbacks that target other
-          // cells of this cycle
-          c.removeAllCallbacks(cells)
-          // we can now safely put a final value
-          c.resolveWithValue(v)
-        }
-      })
-  }
+  private def resolveCycle[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
+    resolve[K, V](cells, cells.head.key.resolve)
 
   /**
    * Resolves a cell with default value.
    */
-  private def resolveDefault[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit = {
-    val key = cells.head.key
-    val result = key.fallback(cells)
+  private def resolveDefault[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
+    resolve[K, V](cells, cells.head.key.fallback)
+
+  private def resolve[K <: Key[V], V](cells: Seq[Cell[K, V]], resolver: Seq[Cell[K, V]] => Seq[(Cell[K, V], V)]): Unit = {
+    val result = resolver(cells)
 
     for ((c, v) <- result)
       execute(new Runnable {
         override def run(): Unit = {
           // remove all callbacks that target other
           // cells of this cycle
-          c.removeAllCallbacks(cells)
+          c.removeAllCallbacks(result.map(_._1))
           // we can now safely put a final value
           c.resolveWithValue(v)
         }
