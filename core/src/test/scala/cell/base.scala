@@ -1790,7 +1790,6 @@ class BaseSuite extends FunSuite {
       cell1.whenNext(cell2, v => NextOutcome(ShouldNotHappen))
       cell2.whenNext(cell1, v => NextOutcome(ShouldNotHappen))
 
-      pool.whileQuiescentResolveCell
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
 
@@ -1824,7 +1823,6 @@ class BaseSuite extends FunSuite {
       cell1.whenNextSequential(cell2, v => NextOutcome(ShouldNotHappen))
       cell2.whenNextSequential(cell1, v => NextOutcome(ShouldNotHappen))
 
-      pool.whileQuiescentResolveCell
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
 
@@ -1865,7 +1863,6 @@ class BaseSuite extends FunSuite {
       cell1.whenNext(cell2, v => NextOutcome(ShouldNotHappen))
       cell2.whenNext(cell1, v => NextOutcome(ShouldNotHappen))
 
-      pool.whileQuiescentResolveCell
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
 
@@ -1906,7 +1903,6 @@ class BaseSuite extends FunSuite {
       cell1.whenNextSequential(cell2, v => NextOutcome(ShouldNotHappen))
       cell2.whenNextSequential(cell1, v => NextOutcome(ShouldNotHappen))
 
-      pool.whileQuiescentResolveCell
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
 

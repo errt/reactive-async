@@ -130,7 +130,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   /**
    * Wait for a quiescent state when no more tasks are being executed. Afterwards, it will resolve
-   * unfinished cells using the keys resolve function and recursively wait for resolution.
+   * unfinished cycles (cSCCs) of cells using the keys resolve function and recursively wait for resolution.
    *
    * @return The future will be set once the resolve is finished and the quiescent state is reached.
    *         The boolean parameter indicates if cycles where resolved or not.
@@ -187,9 +187,12 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   }
 
   /**
-   * Wait for a quiescent state when no more tasks are being executed. Afterwards, it will resolve
-   * unfinished cells using the keys resolve function. If more cells are unresolved, use the
-   * fallback function and recursively wait for resolution.
+   * Wait for a quiescent state.
+    * Afterwards, resolve all cells without dependenciese with the respective
+    * `fallback` value calculated by it's `Key`.
+    * Also, resolve cycles without dependencies (cSCCs)  using the respective `Key`'s `resolve`.
+    * Both might lead to computations on other cells beeing triggered.
+    * If more cells are unresolved, recursively wait for resolution.
    *
    * @return The future will be set once the resolve is finished and the quiescent state is reached.
    *         The boolean parameter indicates if cycles where resolved or not.
@@ -226,26 +229,25 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   }
 
   /**
-   * Resolves a cycle of unfinished cells.
+   * Resolves a cycle of unfinished cells via the key's `resolve()` method.
    */
   private def resolveCycle[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
-    resolve[K, V](cells, cells.head.key.resolve)
+    resolve(cells.head.key.resolve(cells))
 
   /**
-   * Resolves a cell with default value.
+   * Resolves a cell with default value with the key's `fallback()` method.
    */
   private def resolveDefault[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
-    resolve[K, V](cells, cells.head.key.fallback)
+    resolve(cells.head.key.fallback(cells))
 
-  private def resolve[K <: Key[V], V](cells: Seq[Cell[K, V]], resolver: Seq[Cell[K, V]] => Seq[(Cell[K, V], V)]): Unit = {
-    val result = resolver(cells)
-
-    for ((c, v) <- result)
+  /** Resolve all cells with the associated value. */
+  private def resolve[K <: Key[V], V](results: Seq[(Cell[K, V], V)]): Unit = {
+    for ((c, v) <- results)
       execute(new Runnable {
         override def run(): Unit = {
-          // remove all callbacks that target other
-          // cells of this cycle
-          c.removeAllCallbacks(result.map(_._1))
+          // Remove all callbacks that target other cells of this set.
+          // The result of those cells is explicitely given in `results`.
+          c.removeAllCallbacks(results.map(_._1))
           // we can now safely put a final value
           c.resolveWithValue(v)
         }
