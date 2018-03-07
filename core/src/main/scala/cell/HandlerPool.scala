@@ -203,7 +203,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         resolvedCycles = cSCCs.nonEmpty
       }
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().keys.filter(_.tasksActive()).filter(_.numTotalDependencies == 0).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
