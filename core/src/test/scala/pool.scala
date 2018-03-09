@@ -79,7 +79,7 @@ class PoolSuite extends FunSuite {
     val latch = new CountDownLatch(n)
 
     // generate a random list of priorities
-    val ps = scala.util.Random.shuffle((1 to n).toList)
+    val ps = scala.util.Random.shuffle((-n to n).toList)
 
     // create a task for each priority
     ps.foreach(p => {
@@ -93,5 +93,19 @@ class PoolSuite extends FunSuite {
     latch.await()
     pool.shutdown()
     println(ps)
+    /*
+    An actual test could make use of the inversion of ps the inversion of the output o.
+    If priorities are handled correctly, inv(o) <= inv(ps)
+
+
+    def inv(p):
+      s = 0
+      n = len(p)
+      for i in range(n‐1):
+          for j in range(i+1):
+              if p[i] > p[j]:
+                  s += 1
+      return s
+     */
   }
 }
