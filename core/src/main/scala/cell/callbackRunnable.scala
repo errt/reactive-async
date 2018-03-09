@@ -34,7 +34,7 @@ private[cell] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnCom
 private[cell] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
   /** Add this CallbackRunnable to its handler pool such that it is run concurrently. */
   def execute(): Unit =
-    try pool.execute(this)
+    try pool.execute(this, pool.getSchedulingStrategy.calcPriority(dependentCell, otherCell))
     catch { case NonFatal(t) => pool reportFailure t }
 }
 
@@ -110,14 +110,14 @@ private[cell] abstract class CompleteDepRunnable[K <: Key[V], V](
         dependentCompleter.putFinal(v) // deps will be removed by putFinal()
       case NextOutcome(v) =>
         dependentCompleter.putNext(v)
-        dependentCompleter.removeDep(otherCell)
+        dependentCompleter.removeCompleteDep(otherCell)
         dependentCompleter.removeNextDep(otherCell)
       case NoOutcome =>
-        dependentCompleter.removeDep(otherCell)
+        dependentCompleter.removeCompleteDep(otherCell)
         dependentCompleter.removeNextDep(otherCell)
     }
   case Failure(_) =>
-    dependentCompleter.removeDep(otherCell)
+    dependentCompleter.removeCompleteDep(otherCell)
     dependentCompleter.removeNextDep(otherCell)
 }) with Dependency[K, V]
 

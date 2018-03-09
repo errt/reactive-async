@@ -37,7 +37,7 @@ trait Cell[K <: Key[V], V] {
    * }}}
    *
    * @param other  Cell that `this` Cell depends on.
-   * @param valueCallback  Callback that receives the final value of `other` and returns an `Outcome` for `this` cell.
+   * @param valueCallback  Callback that retrieves the final value of `other` and returns an Outcome for `this` cell.
    */
   def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
   def whenCompleteSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
@@ -417,7 +417,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override private[cell] def addCompleteCallback(callback: CompleteCallbackRunnable[K, V], cell: Cell[K, V]): Unit = {
-    dispatchOrAddCallback(callback)
+    dispatchOrAddCompleteCallback(callback)
   }
 
   override private[cell] def addNextCallback(callback: NextCallbackRunnable[K, V], cell: Cell[K, V]): Unit = {
@@ -597,20 +597,20 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   /**
-   * Mark this cell as "running".
+   * Set a flag to indicate that tasks relevant to this cell are active.
    *
    * @return Returns true, iff the cell's status changed (i.e. it had not been running before).
    */
   @tailrec
-  override private[cell] final def markAsRunning(): Boolean = {
+  override private[cell] final def setTasksActive(): Boolean = {
     state.get() match {
       case pre: State[_, _] =>
         val current = pre.asInstanceOf[State[K, V]]
         val newState = new State(current.res, true, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks)
         if (!state.compareAndSet(current, newState)) setTasksActive()
         else !pre.tasksActive
-      }
-    case _ => false
+      case _ => false
+    }
   }
 
   // Schedules execution of `callback` when next intermediate result is available.
@@ -622,7 +622,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   // Schedules execution of `callback` when completed with final result.
   override def onComplete[U](callback: Try[V] => U): Unit = {
     val runnable = new CompleteConcurrentCallbackRunnable[K, V](pool, null, this, callback) // NULL indicates that no cell is waiting for this callback.
-    dispatchOrAddCallback(runnable)
+    dispatchOrAddCompleteCallback(runnable)
   }
 
   /**
