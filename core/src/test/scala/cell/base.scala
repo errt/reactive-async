@@ -2378,7 +2378,7 @@ class BaseSuite extends FunSuite {
       override def toString = "ReactivePropertyStoreKey"
     }
 
-    implicit val pool = new HandlerPool(parallelism = 1)
+    implicit val pool = new HandlerPool()
     val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val completer2 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell1 = completer1.cell

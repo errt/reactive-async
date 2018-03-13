@@ -20,9 +20,11 @@ private class PoolState(val handlers: List[() => Unit] = List(), val submittedTa
     submittedTasks == 0
 }
 
-class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
+class HandlerPool(parallelism: Option[Int] = None, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
 
-  private val pool: ForkJoinPool = new ForkJoinPool(parallelism)
+  private val pool: ForkJoinPool =
+    parallelism.map(new ForkJoinPool(_))
+      .getOrElse(new ForkJoinPool()) // Use all available processors, if no number if given
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 

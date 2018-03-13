@@ -32,7 +32,7 @@ class PsSuite extends FunSuite {
   }
 
   test("cell dependency on itself whenNext") {
-    implicit val pool = new HandlerPool(parallelism = 1)
+    implicit val pool = new HandlerPool()
     val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val completer2 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell1 = completer1.cell
@@ -90,7 +90,7 @@ class PsSuite extends FunSuite {
   }
 
   test("cell dependency on itself whenNextSequential using fallback only") {
-    implicit val pool = new HandlerPool(parallelism = 8)
+    implicit val pool = new HandlerPool()
     val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell1 = completer1.cell
 
