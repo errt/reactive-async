@@ -130,7 +130,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   /**
    * Wait for a quiescent state when no more tasks are being executed. Afterwards, it will resolve
-   * unfinished cells using the keys resolve function and recursively wait for resolution.
+   * unfinished cycles (cSCCs) of cells using the keys resolve function and recursively wait for resolution.
    *
    * @return The future will be set once the resolve is finished and the quiescent state is reached.
    *         The boolean parameter indicates if cycles where resolved or not.
@@ -162,6 +162,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * Wait for a quiescent state when no more tasks are being executed. Afterwards, it will resolve
    * unfinished cells using the keys fallback function and recursively wait for resolution.
    *
+   * Note that this also resolves cells that have dependencies on other cells – in contrast to
+   * quiescentResolveCell()
+   *
    * @return The future will be set once the resolve is finished and the quiescent state is reached.
    *         The boolean parameter indicates if cycles where resolved or not.
    */
@@ -169,7 +172,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().keys
+        .filter(_.tasksActive())
+        .asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
 
@@ -184,9 +189,12 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   }
 
   /**
-   * Wait for a quiescent state when no more tasks are being executed. Afterwards, it will resolve
-   * unfinished cells using the keys resolve function. If more cells are unresolved, use the
-   * fallback function and recursively wait for resolution.
+   * Wait for a quiescent state.
+   * Afterwards, resolve all cells without dependenciese with the respective
+   * `fallback` value calculated by it's `Key`.
+   * Also, resolve cycles without dependencies (cSCCs)  using the respective `Key`'s `resolve`.
+   * Both might lead to computations on other cells beeing triggered.
+   * If more cells are unresolved, recursively wait for resolution.
    *
    * @return The future will be set once the resolve is finished and the quiescent state is reached.
    *         The boolean parameter indicates if cycles where resolved or not.
@@ -203,7 +211,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         resolvedCycles = cSCCs.nonEmpty
       }
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val rest = this.cellsNotDone.get().keys
+        .filter(_.tasksActive())
+        .filter(_.isIndependent())
+        .asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
       }
@@ -233,7 +244,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     resolve(cells.head.key.fallback(cells))
 
   /** Resolve all cells with the associated value. */
-  private def resolve[K <: Key[V], V](results: Seq[(Cell[K, V], V)]): Unit =
+  private def resolve[K <: Key[V], V](results: Seq[(Cell[K, V], V)]): Unit = {
     for ((c, v) <- results)
       execute(new Runnable {
         override def run(): Unit = {
@@ -244,6 +255,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
           c.resolveWithValue(v)
         }
       })
+  }
 
   /**
    * Increase the number of submitted tasks.
