@@ -202,14 +202,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   def quiescentResolveCell[K <: Key[V], V]: Future[Boolean] = {
     val p = Promise[Boolean]
     this.onQuiescent { () =>
-      // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
-      var resolvedCycles = false
-      if (registered.nonEmpty) {
-        val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
-        cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
-        resolvedCycles = cSCCs.nonEmpty
-      }
       // Finds the rest of the unresolved cells (that have been triggered)
       val rest = this.cellsNotDone.get().keys
         .filter(_.tasksActive())
@@ -217,6 +209,15 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         .asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
         resolveDefault(rest)
+      }
+
+      // Find one closed strongly connected component (cell)
+      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      var resolvedCycles = false
+      if (registered.nonEmpty) {
+        val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
+        cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
+        resolvedCycles = cSCCs.nonEmpty
       }
 
       // Wait again for quiescent state. It's possible that other tasks where scheduled while
@@ -230,16 +231,15 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     p.future
   }
 
-
   /**
-    * Resolves a cycle of unfinished cells via the key's `resolve()` method.
-    */
+   * Resolves a cycle of unfinished cells via the key's `resolve()` method.
+   */
   private def resolveCycle[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
     resolve(cells.head.key.resolve(cells))
 
   /**
-    * Resolves a cell with default value with the key's `fallback()` method.
-    */
+   * Resolves a cell with default value with the key's `fallback()` method.
+   */
   private def resolveDefault[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
     resolve(cells.head.key.fallback(cells))
 
