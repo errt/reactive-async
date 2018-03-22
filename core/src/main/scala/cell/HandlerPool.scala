@@ -202,26 +202,27 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   def quiescentResolveCell[K <: Key[V], V]: Future[Boolean] = {
     val p = Promise[Boolean]
     this.onQuiescent { () =>
-      // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val activeCells = this.cellsNotDone.get().keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       var resolvedCycles = false
-      if (registered.nonEmpty) {
-        val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
-        cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
-        resolvedCycles = cSCCs.nonEmpty
-      }
-      // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.get().keys
-        .filter(_.tasksActive())
-        .filter(_.isIndependent())
-        .asInstanceOf[Iterable[Cell[K, V]]].toSeq
-      if (rest.nonEmpty) {
-        resolveDefault(rest)
+
+      val independent = activeCells.filter(_.isIndependent())
+      if (independent.nonEmpty) {
+        // Resolve indepdent cells with fallback values
+        resolveDefault(independent)
+      } else {
+        // Otherwise, find and resolve closed strongly connected components and resolve them.
+
+        // Find closed strongly connected component (cell)
+        if (activeCells.nonEmpty) {
+          val cSCCs = closedSCCs(activeCells, (cell: Cell[K, V]) => cell.totalCellDependencies)
+          cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
+          resolvedCycles = cSCCs.nonEmpty
+        }
       }
 
       // Wait again for quiescent state. It's possible that other tasks where scheduled while
       // resolving the cells.
-      if (resolvedCycles || rest.nonEmpty) {
+      if (resolvedCycles || independent.nonEmpty) {
         p.completeWith(quiescentResolveCell)
       } else {
         p.success(false)
