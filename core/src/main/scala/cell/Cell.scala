@@ -116,6 +116,7 @@ trait Cell[K <: Key[V], V] {
   def isADependee(): Boolean
   private[cell] def removeAllCallbacks(cell: Cell[K, V]): Unit
   private[cell] def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit
+  def dependsOn(cell: Cell[K, V]): Boolean
 }
 
 object Cell {
@@ -723,6 +724,22 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    */
   override def isADependee(): Boolean = {
     numCompleteCallbacks > 0 || numNextCallbacks > 0
+  }
+
+  /**
+   * Checks if this cell depends on a given cell.
+   * @param cell The dependee cell
+   * @return true if this cell depends on cell. False otherwise
+   */
+  override def dependsOn(cell: Cell[K, V]): Boolean = {
+    state.get() match {
+      case finalRes: Try[_] => // completed with final result
+        false
+
+      case raw: State[_, _] => // not completed
+        val current = raw.asInstanceOf[State[K, V]]
+        current.nextDeps.contains(cell) || current.completeDeps.contains(cell)
+    }
   }
 
 }
