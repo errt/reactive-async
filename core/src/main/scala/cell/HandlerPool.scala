@@ -1,13 +1,13 @@
 package cell
 
-import java.util.concurrent.{ PriorityBlockingQueue, ThreadPoolExecutor, TimeUnit }
+import java.util.concurrent.{ AbstractExecutorService, PriorityBlockingQueue, ThreadPoolExecutor, TimeUnit }
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ForkJoinPool
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.{ Await, Future, Promise }
 import scala.concurrent.duration._
-
 import lattice.{ DefaultKey, Key, Updater }
 import org.opalj.graphs._
 
@@ -31,19 +31,17 @@ abstract class PriorityRunnable(val priority: Int) extends Runnable with Compara
   }
 }
 
-class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace()) {
+class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => Unit = _.printStackTrace(), scheduling: SchedulingStrategy = DefaultScheduling) {
 
-  private val pool: ThreadPoolExecutor = new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new PriorityBlockingQueue[Runnable]())
+  private val pool: AbstractExecutorService =
+    if (scheduling == DefaultScheduling)
+      new ForkJoinPool(parallelism)
+    else
+      new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new PriorityBlockingQueue[Runnable]())
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Queue[SequentialCallbackRunnable[_, _]]]](Map()) // use `values` to store all pending sequential triggers
-
-  private var scheduling: SchedulingStrategy = DefaultScheduling
-
-  def setSchedulingStrategy(strategy: SchedulingStrategy): Unit = {
-    scheduling = strategy
-  }
 
   def getSchedulingStrategy: SchedulingStrategy = scheduling
 
@@ -395,35 +393,35 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   }
 
   private def callSequentialCallback[K <: Key[V], V](dependentCell: Cell[K, V]): Unit = {
-        val registered = cellsNotDone.get()
+    val registered = cellsNotDone.get()
 
-        // only call the callback, if the cell has not been completed
-        if (registered.contains(dependentCell)) {
-          val tasks = registered(dependentCell)
-          /*
+    // only call the callback, if the cell has not been completed
+    if (registered.contains(dependentCell)) {
+      val tasks = registered(dependentCell)
+      /*
             Pop an element from the queue only if it is completely done!
             That way, one can always start running sequential callbacks, if the list has been empty.
            */
-          val task = tasks.head // The queue must not be empty! Caller has to assert this.
-          val priority = task.pool.getSchedulingStrategy
-            .calcPriority(dependentCell.asInstanceOf[Cell[K, V]], task.otherCell.asInstanceOf[Cell[K, V]])
-          pool.execute(new PriorityRunnable(priority) {
-            override def run(): Unit = {
-              try {
-                task.run()
-              } catch {
-                case NonFatal(e) =>
-                  unhandledExceptionHandler(e)
-              } finally {
-                decSubmittedTasks()
+      val task = tasks.head // The queue must not be empty! Caller has to assert this.
+      val priority = task.pool.getSchedulingStrategy
+        .calcPriority(dependentCell.asInstanceOf[Cell[K, V]], task.otherCell.asInstanceOf[Cell[K, V]])
+      pool.execute(new PriorityRunnable(priority) {
+        override def run(): Unit = {
+          try {
+            task.run()
+          } catch {
+            case NonFatal(e) =>
+              unhandledExceptionHandler(e)
+          } finally {
+            decSubmittedTasks()
 
-                // The task has been run. Remove it. If the new list is not empty, callSequentialCallback(cell)
-                if (dequeueSequentialCallback(dependentCell).nonEmpty)
-                  callSequentialCallback(dependentCell)
-              }
-            }
-          })
-      }
+            // The task has been run. Remove it. If the new list is not empty, callSequentialCallback(cell)
+            if (dequeueSequentialCallback(dependentCell).nonEmpty)
+              callSequentialCallback(dependentCell)
+          }
+        }
+      })
+    }
   }
 
   /**

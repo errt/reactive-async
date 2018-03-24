@@ -70,7 +70,6 @@ class PoolSuite extends FunSuite {
     assert(regCells.size === 1000)
   }
 
-
   test("prio") {
     // this tests demonstrates, that high priority tasks are executed with high priority:
     // The output should be roughly sorted.
