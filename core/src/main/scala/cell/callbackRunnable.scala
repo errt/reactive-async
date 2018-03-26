@@ -87,9 +87,11 @@ private[cell] abstract class CompleteCallbackRunnable[K <: Key[V], V](
 
     if (dependentCell != null) // dependentCell == null for oncomplete callbacks
       dependentCell.incIncomingCallbacks()
-    callback(Success(otherCell.getResult()))
-    if (dependentCell != null)
-      dependentCell.decIncomingCallbacks()
+    try
+      callback(Success(otherCell.getResult()))
+    finally
+      if (dependentCell != null)
+        dependentCell.decIncomingCallbacks()
   }
 }
 
@@ -174,9 +176,11 @@ private[cell] abstract class NextCallbackRunnable[K <: Key[V], V](
   def run(): Unit = {
     if (dependentCell != null) // dependetCell == null for onnext callbacks
       dependentCell.incIncomingCallbacks()
-    callback(Success(otherCell.getResult()))
-    if (dependentCell != null)
-      dependentCell.decIncomingCallbacks()
+    try
+      callback(Success(otherCell.getResult()))
+    finally
+      if (dependentCell != null)
+        dependentCell.decIncomingCallbacks()
   }
 }
 
@@ -209,7 +213,8 @@ private[cell] abstract class NextDepRunnable[K <: Key[V], V](
   override val valueCallback: V => Outcome[V]) extends NextCallbackRunnable[K, V](pool, dependentCompleter.cell, otherCell, t => {
   t match {
     case Success(_) =>
-      valueCallback(otherCell.getResult()) match {
+      val callbackResult = valueCallback(otherCell.getResult())
+      callbackResult match {
         case NextOutcome(v) =>
           dependentCompleter.putNext(v)
         case FinalOutcome(v) =>

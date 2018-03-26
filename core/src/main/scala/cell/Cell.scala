@@ -202,7 +202,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    * Assumes that dependencies need to be kept until a final result is known.
    */
   private val state = new AtomicReference[AnyRef](State.empty[K, V](updater))
-  private val numIncomingCallbacks = new AtomicInteger(0) // Should this be included into `state`?
+  private val numIncomingCallbacks = new AtomicReference[(Int, V)]((0, updater.bottom)) // Should this be included into `state`?
 
   // `CellCompleter` and corresponding `Cell` are the same run-time object.
   override def cell: Cell[K, V] = this
@@ -768,17 +768,28 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   /** Called, when a CallbackRunnable r with r.dependentCell == this has been started. */
-  override private[cell] def incIncomingCallbacks(): Int = {
-    numIncomingCallbacks.incrementAndGet()
+  @tailrec
+  override final private[cell] def incIncomingCallbacks(): Int = {
+    val current = numIncomingCallbacks.get()
+    val next = (current._1 + 1, current._2)
+    if (numIncomingCallbacks.compareAndSet(current, next)) next._1
+    else incIncomingCallbacks()
   }
 
   /**
    * Called, when a CallbackRunnable r with r.dependentCell == this has been completed.
    * Triggers all outgoing callbacks, if no more incoming callbacks are running.
    */
-  override private[cell] def decIncomingCallbacks(): Int = {
-    val newValue = numIncomingCallbacks.decrementAndGet()
-    if (newValue == 0) triggerNextCallbacks()
-    newValue
+  @tailrec
+  override final private[cell] def decIncomingCallbacks(): Int = {
+    val current = numIncomingCallbacks.get()
+    val next = (current._1 - 1, current._2)
+    if (numIncomingCallbacks.compareAndSet(current, next)) {
+      if (next._1 == 0 && next._2 != getResult()) {
+        triggerNextCallbacks()
+      }
+      next._1
+    }
+    else decIncomingCallbacks()
   }
 }
