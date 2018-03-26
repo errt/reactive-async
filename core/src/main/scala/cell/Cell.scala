@@ -122,8 +122,8 @@ trait Cell[K <: Key[V], V] {
   private[cell] def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit
   def dependsOn(cell: Cell[K, V]): Boolean
 
-  private[cell] def incIncomingCallbacks(): Int
-  private[cell] def decIncomingCallbacks(): Int
+  private[cell] def incIncomingCallbacks(): Unit
+  private[cell] def decIncomingCallbacks(): Unit
 }
 
 object Cell {
@@ -468,7 +468,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             // If we came here via a direct putNext (instead of Outcome of a whenNextCallback)
             // this incoming change has not been counted. So we need to manually start outgoing callbacks.
             // (This might lead to duplicate invocation.)
-            if (numIncomingCallbacks.get() == 0) triggerNextCallbacks()
+            if (numIncomingCallbacks.get()._1 == 0) triggerNextCallbacks()
             true
           }
         } else true
@@ -769,11 +769,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   /** Called, when a CallbackRunnable r with r.dependentCell == this has been started. */
   @tailrec
-  override final private[cell] def incIncomingCallbacks(): Int = {
+  override final private[cell] def incIncomingCallbacks(): Unit = {
     val current = numIncomingCallbacks.get()
-    val next = (current._1 + 1, current._2)
-    if (numIncomingCallbacks.compareAndSet(current, next)) next._1
-    else incIncomingCallbacks()
+    val next =
+      if (current._1 == 0) (current._1 + 1, getResult())
+      else (current._1 + 1, current._2)
+    if (!numIncomingCallbacks.compareAndSet(current, next)) incIncomingCallbacks()
   }
 
   /**
@@ -781,14 +782,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    * Triggers all outgoing callbacks, if no more incoming callbacks are running.
    */
   @tailrec
-  override final private[cell] def decIncomingCallbacks(): Int = {
+  override final private[cell] def decIncomingCallbacks(): Unit = {
     val current = numIncomingCallbacks.get()
     val next = (current._1 - 1, current._2)
     if (numIncomingCallbacks.compareAndSet(current, next)) {
-      if (next._1 == 0 && next._2 != getResult()) {
+      if ((next._1 == 0) && (next._2 != getResult()))
         triggerNextCallbacks()
-      }
-      next._1
     }
     else decIncomingCallbacks()
   }
