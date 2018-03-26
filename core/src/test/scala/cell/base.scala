@@ -976,10 +976,13 @@ class BaseSuite extends FunSuite {
 
       val cell1 = completer1.cell
 
-      pool.execute(() => cell1.whenNext(completer2.cell, x => {
-        if (x == Mutable) NextOutcome(Mutable)
-        else NoOutcome
-      }))
+      pool.execute(() => {
+        cell1.whenNext(completer2.cell, x => {
+          if (x == Mutable) NextOutcome(Mutable)
+          else NoOutcome
+        })
+        ()
+      })
       pool.execute(() => completer2.putNext(Mutable))
 
       val fut = pool.quiescentResolveDefaults
