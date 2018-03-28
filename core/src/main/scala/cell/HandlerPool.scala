@@ -11,6 +11,7 @@ import lattice.{ DefaultKey, Key, Updater }
 import org.opalj.graphs._
 
 import scala.collection.concurrent.TrieMap
+import scala.collection.immutable.Queue
 
 /* Need to have reference equality for CAS.
  */
@@ -25,7 +26,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
-  private val cellsNotDone = TrieMap.empty[Cell[_, _], (AtomicBoolean, ConcurrentLinkedQueue[SequentialCallbackRunnable[_, _]])] // use `values` to store all pending sequential triggers
+  private val cellsNotDone = TrieMap.empty[Cell[_, _], AtomicReference[Queue[SequentialCallbackRunnable[_, _]]]] // use `values` to store all pending sequential triggers
 
   /**
    * Returns a new cell in this HandlerPool.
@@ -75,7 +76,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * @param cell The cell.
    */
   def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
-    cellsNotDone.putIfAbsent(cell, (new AtomicBoolean(false), new ConcurrentLinkedQueue())) match {
+    cellsNotDone.putIfAbsent(cell, new AtomicReference(Queue.empty)) match {
       case Some(_) => println(s"$cell already registered!") //throw new IllegalArgumentException("Cell already registered!")
       case None => // Everything is fine
     }
@@ -97,14 +98,15 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    */
   def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     cellsNotDone.remove(cell) match {
-      case Some((_, q)) =>
-        if (q.size() > 1) {
+      case Some(q) =>
+        if (q.get.lengthCompare(1) > 1) {
           // Note that the first element of the queue is already running,
           // so decSubmittedTasks(1) will be called, when this element
           // has been completed. The following elements won't be executed
           // any more, so we can call decSubmittedTasks for them.
-          decSubmittedTasks(q.size - 1)
+          decSubmittedTasks(q.get.size - 1)
         }
+        q.set(null)
       case None => // No element in map
     }
 
@@ -351,17 +353,23 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    */
   private[cell] def scheduleSequentialCallback[K <: Key[V], V](callback: SequentialCallbackRunnable[K, V]): Unit = {
     val dependentCell = callback.dependentCell
+    var startCallback = false
 
     cellsNotDone.get(dependentCell) match {
-      case Some((running, q)) =>
-        incSubmittedTasks()
-        q.add(callback)
+      case Some(q) =>
+        var success = false
+        while (!success) {
+          val oldCallbackQueue = q.get
+          val newCallbackQueue = oldCallbackQueue.enqueue(callback)
+          success = q.compareAndSet(oldCallbackQueue, newCallbackQueue)
+          if (success) incSubmittedTasks()
+          startCallback = oldCallbackQueue.isEmpty
+        }
 
-        // If the list has been empty, then start execution the scheduled tasks. (Otherwise, some task is already running
-        // and the newly added task will eventually run.
-        if (running.compareAndSet(false, true)) {
+        if (startCallback) {
           callSequentialCallback(dependentCell)
         }
+
       case None => // Do nothing
     }
 
@@ -387,28 +395,40 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * Called by callSequentialCallback after one callback has been run.
    * If the returned list is not empty, a next callback must be run.
    */
-  //  private def dequeueSequentialCallback[K <: Key[V], V](cell: Cell[K, V]): ConcurrentLinkedQueue[SequentialCallbackRunnable[_, _]] = {
-  //    //    val registered = cellsNotDone.get()
-  //    //    if (registered.contains(cell)) {
-  //    //      // remove the task that has just been finished
-  //    //      val oldCallbackQueue = registered(cell)
-  //    //      val (_, newCallbackQueue) = oldCallbackQueue.dequeue
-  //    //      val newRegistered = registered + (cell -> newCallbackQueue)
-  //    //
-  //    //      // store the new list of tasks
-  //    //      if (cellsNotDone.compareAndSet(registered, newRegistered)) newCallbackQueue
-  //    //      else dequeueSequentialCallback(cell) // try again
-  //    //    } else {
-  //    //      // cell has already been completed by now. No callbacks need to be run any more
-  //    //      Queue.empty
-  //    //    }
-  //  }
+  private def dequeueSequentialCallback[K <: Key[V], V](cell: Cell[K, V]): Queue[SequentialCallbackRunnable[_, _]] = {
+    cellsNotDone.get(cell) match {
+      case Some(q) =>
+        val oldCallbackQueue = q.get
+        val (_, newCallbackQueue) = oldCallbackQueue.dequeue
+        if (q.compareAndSet(oldCallbackQueue, newCallbackQueue)) {
+          newCallbackQueue
+        } else {
+          dequeueSequentialCallback(cell) // try again
+        }
+      case None => Queue.empty
+    }
+    //
+    //          val registered = cellsNotDone.get()
+    //          if (registered.contains(cell)) {
+    //            // remove the task that has just been finished
+    //            val oldCallbackQueue = registered(cell)
+    //            val (_, newCallbackQueue) = oldCallbackQueue.dequeue
+    //            val newRegistered = registered + (cell -> newCallbackQueue)
+    //
+    //            // store the new list of tasks
+    //            if (cellsNotDone.compareAndSet(registered, newRegistered)) newCallbackQueue
+    //            else dequeueSequentialCallback(cell) // try again
+    //          } else {
+    //            // cell has already been completed by now. No callbacks need to be run any more
+    //            Queue.empty
+    //          }
+  }
 
   private def callSequentialCallback[K <: Key[V], V](dependentCell: Cell[K, V]): Unit = {
     pool.execute(() => {
       cellsNotDone.get(dependentCell) match {
-        case Some((running, q)) =>
-          val task = q.poll // The queue must not be empty! Caller has to assert this.
+        case Some(q) =>
+          val task = q.get.head // The queue must not be empty! Caller has to assert this.
           if (task == null) {
             println("CONCURRENCY BUG!!!")
           }
@@ -440,10 +460,11 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             // How to fix: Call poll and isEmpty atomically
             //
 
-            running.set(!q.isEmpty)
-            if (running.get()) {
+            // The task has been run. Remove it. If the new list is not empty, callSequentialCallback(cell)
+            if (dequeueSequentialCallback(dependentCell).nonEmpty) {
               callSequentialCallback(dependentCell)
             }
+
           }
         case None => // Nothing to do
       }
