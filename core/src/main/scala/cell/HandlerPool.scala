@@ -1,7 +1,7 @@
 package cell
 
 import java.util.concurrent.{ ConcurrentLinkedQueue, ForkJoinPool }
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
@@ -25,7 +25,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
-  private val cellsNotDone = TrieMap.empty[Cell[_, _], ConcurrentLinkedQueue[SequentialCallbackRunnable[_, _]]] // use `values` to store all pending sequential triggers
+  private val cellsNotDone = TrieMap.empty[Cell[_, _], (AtomicBoolean, ConcurrentLinkedQueue[SequentialCallbackRunnable[_, _]])] // use `values` to store all pending sequential triggers
 
   /**
    * Returns a new cell in this HandlerPool.
@@ -75,8 +75,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * @param cell The cell.
    */
   def register[K <: Key[V], V](cell: Cell[K, V]): Unit = {
-    cellsNotDone.putIfAbsent(cell, new ConcurrentLinkedQueue()) match {
-      case Some(_) => //throw new IllegalArgumentException("Cell already registered!")
+    cellsNotDone.putIfAbsent(cell, (new AtomicBoolean(false), new ConcurrentLinkedQueue())) match {
+      case Some(_) => println(s"$cell already registered!") //throw new IllegalArgumentException("Cell already registered!")
       case None => // Everything is fine
     }
 
@@ -97,7 +97,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    */
   def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit = {
     cellsNotDone.remove(cell) match {
-      case Some(q) =>
+      case Some((_, q)) =>
         if (q.size() > 1) {
           // Note that the first element of the queue is already running,
           // so decSubmittedTasks(1) will be called, when this element
@@ -351,13 +351,17 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    */
   private[cell] def scheduleSequentialCallback[K <: Key[V], V](callback: SequentialCallbackRunnable[K, V]): Unit = {
     val dependentCell = callback.dependentCell
-    var startCallback = false
 
     cellsNotDone.get(dependentCell) match {
-      case Some(q) =>
-        startCallback = q.isEmpty
-        q.add(callback)
+      case Some((running, q)) =>
         incSubmittedTasks()
+        q.add(callback)
+
+        // If the list has been empty, then start execution the scheduled tasks. (Otherwise, some task is already running
+        // and the newly added task will eventually run.
+        if (running.compareAndSet(false, true)) {
+          callSequentialCallback(dependentCell)
+        }
       case None => // Do nothing
     }
 
@@ -376,11 +380,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     //        success = true
     //      }
     //    }
-
-    // If the list has been empty, then start execution the scheduled tasks. (Otherwise, some task is already running
-    // and the newly added task will eventually run.
-    if (startCallback)
-      callSequentialCallback(dependentCell)
   }
 
   /**
@@ -389,13 +388,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * If the returned list is not empty, a next callback must be run.
    */
   //  private def dequeueSequentialCallback[K <: Key[V], V](cell: Cell[K, V]): ConcurrentLinkedQueue[SequentialCallbackRunnable[_, _]] = {
-  //    cellsNotDone.get(cell) match {
-  //      case Some(q) =>
-  //        q.poll()
-  //        q
-  //      case None => new ConcurrentLinkedQueue()
-  //    }
-  //
   //    //    val registered = cellsNotDone.get()
   //    //    if (registered.contains(cell)) {
   //    //      // remove the task that has just been finished
@@ -415,8 +407,11 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   private def callSequentialCallback[K <: Key[V], V](dependentCell: Cell[K, V]): Unit = {
     pool.execute(() => {
       cellsNotDone.get(dependentCell) match {
-        case Some(q) =>
+        case Some((running, q)) =>
           val task = q.poll // The queue must not be empty! Caller has to assert this.
+          if (task == null) {
+            println("CONCURRENCY BUG!!!")
+          }
 
           try {
             task.run()
@@ -427,7 +422,26 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             decSubmittedTasks()
 
             // The task has been run. Remove it. If the new list is not empty, callSequentialCallback(cell)
-            if (!q.isEmpty) {
+
+            // TODO: between poll and isEmpty is a small window, where a concurrency bug may be present.
+            // This can happen if the following constrains are true (Number in from is some thread id):
+            //   0 - q.size == 1
+            //   0 - q.poll() called
+            //   0 - Thread is stalled
+            //   1 - scheduleSequentialCallback.startCallback == true
+            //   1 - q.add
+            //   1 - will call callSequentialCallback
+            //   0 - isEmpty returns false and callSequentialCallback is called
+            //
+            // Now, only one element is in the queue and callSequentialCallback was called twice.
+            // This leads to task being null and decSubmittedTasks throwing a BOOM exception, because
+            // with only one task, decSubmittedTasks was called twice!
+            //
+            // How to fix: Call poll and isEmpty atomically
+            //
+
+            running.set(!q.isEmpty)
+            if (running.get()) {
               callSequentialCallback(dependentCell)
             }
           }
