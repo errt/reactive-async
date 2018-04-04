@@ -26,7 +26,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
-  private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Queue[SequentialCallbackRunnable[_, _]]]](Map()) // use `values` to store all pending sequential triggers
+  private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Unit]](Map()) // use `values` to store all pending sequential triggers
 
   /**
    * Returns a new cell in this HandlerPool.
@@ -79,7 +79,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     var success = false
     while (!success) {
       val registered = cellsNotDone.get()
-      val newRegistered = registered + (cell -> Queue())
+      val newRegistered = registered + (cell -> ())
       success = cellsNotDone.compareAndSet(registered, newRegistered)
     }
   }
@@ -93,14 +93,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val registered = cellsNotDone.get()
     if (registered.contains(cell)) {
       val newRegistered = registered - cell
-      if (cellsNotDone.compareAndSet(registered, newRegistered)) {
-        if (registered(cell).lengthCompare(1) > 0)
-          // Note that the first element of the queue is already running,
-          // so decSubmittedTasks(1) will be called, when this element
-          // has been completed. The following elements won't be executed
-          // any more, so we can call decSubmittedTasks for them.
-          decSubmittedTasks(registered(cell).size - 1)
-      } else deregister(cell) // try deregister again
+      if (!cellsNotDone.compareAndSet(registered, newRegistered))
+        deregister(cell) // try deregister again
     }
   }
 
@@ -321,88 +315,6 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
             unhandledExceptionHandler(e)
         } finally {
           decSubmittedTasks()
-        }
-      }
-    })
-  }
-
-  /**
-   * Adds sequential callback.
-   * The dependent cell is read from the NextDepRunnable object.
-   *
-   * @param callback The callback that should be run sequentially to all other sequential callbacks for the dependent cell.
-   */
-  private[rasync] def scheduleSequentialCallback[K <: Key[V], V](callback: SequentialCallbackRunnable[K, V]): Unit = {
-    val dependentCell = callback.dependentCell
-    var success = false
-    var startCallback = false
-    while (!success) {
-      val registered = cellsNotDone.get()
-      if (registered.contains(dependentCell)) {
-        val oldCallbackQueue = registered(dependentCell)
-        val newCallbackQueue = oldCallbackQueue.enqueue(callback)
-        val newRegistered = registered + (dependentCell -> newCallbackQueue)
-        success = cellsNotDone.compareAndSet(registered, newRegistered)
-        if (success) incSubmittedTasks() // note that decSubmitted Tasks is called in callSequentialCallback
-        startCallback = oldCallbackQueue.isEmpty
-      } else {
-        success = true
-      }
-    }
-
-    // If the list has been empty, then start execution the scheduled tasks. (Otherwise, some task is already running
-    // and the newly added task will eventually run.
-    if (startCallback)
-      callSequentialCallback(dependentCell)
-  }
-
-  /**
-   * Returns the the queue of yet to be run callbacks.
-   * Called by callSequentialCallback after one callback has been run.
-   * If the returned list is not empty, a next callback must be run.
-   */
-  @tailrec
-  private def dequeueSequentialCallback[K <: Key[V], V](cell: Cell[K, V]): Queue[SequentialCallbackRunnable[_, _]] = {
-    val registered = cellsNotDone.get()
-    if (registered.contains(cell)) {
-      // remove the task that has just been finished
-      val oldCallbackQueue = registered(cell)
-      val (_, newCallbackQueue) = oldCallbackQueue.dequeue
-      val newRegistered = registered + (cell -> newCallbackQueue)
-
-      // store the new list of tasks
-      if (cellsNotDone.compareAndSet(registered, newRegistered)) newCallbackQueue
-      else dequeueSequentialCallback(cell) // try again
-    } else {
-      // cell has already been completed by now. No callbacks need to be run any more
-      Queue.empty
-    }
-  }
-
-  private def callSequentialCallback[K <: Key[V], V](dependentCell: Cell[K, V]): Unit = {
-    pool.execute(() => {
-      val registered = cellsNotDone.get()
-
-      // only call the callback, if the cell has not been completed
-      if (registered.contains(dependentCell)) {
-        val tasks = registered(dependentCell)
-        /*
-          Pop an element from the queue only if it is completely done!
-          That way, one can always start running sequential callbacks, if the list has been empty.
-         */
-        val task = tasks.head // The queue must not be empty! Caller has to assert this.
-
-        try {
-          task.run()
-        } catch {
-          case NonFatal(e) =>
-            unhandledExceptionHandler(e)
-        } finally {
-          decSubmittedTasks()
-
-          // The task has been run. Remove it. If the new list is not empty, callSequentialCallback(cell)
-          if (dequeueSequentialCallback(dependentCell).nonEmpty)
-            callSequentialCallback(dependentCell)
         }
       }
     })
