@@ -15,7 +15,7 @@ trait AggregationUpdater[V] extends Lattice[V] with Updater[V] {
 trait MonotonicUpdater[V] extends PartialOrderingWithBottom[V] with Updater[V] {
   override def update(current: V, next: V): V =
     if (lteq(current, next)) next
-    else throw new NotMonotonicException(current, next)
+    else throw NotMonotonicException(current, next)
 }
 
 object Updater {
