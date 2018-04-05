@@ -1,6 +1,6 @@
 package com.phaller.rasync
 
-import java.util.concurrent.{ConcurrentHashMap, ForkJoinPool}
+import java.util.concurrent.{ConcurrentLinkedQueue, ForkJoinPool}
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.annotation.tailrec
@@ -9,9 +9,8 @@ import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration._
 import lattice.{DefaultKey, Key, Updater}
 import org.opalj.graphs._
+import scala.collection.JavaConverters._
 
-import scala.collection.concurrent.TrieMap
-import scala.collection.immutable.Queue
 
 /* Need to have reference equality for CAS.
  */
@@ -26,7 +25,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
-  private val cellsNotDone = TrieMap[Cell[_, _], Unit]()
+  private val cellsNotDone = new ConcurrentLinkedQueue[Cell[_, _]]()
 
   /**
    * Returns a new cell in this HandlerPool.
@@ -76,7 +75,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * @param cell The cell.
    */
   def register[K <: Key[V], V](cell: Cell[K, V]): Unit =
-    cellsNotDone.put(cell, ())
+    cellsNotDone.add(cell)
 
   /**
    * Deregister a cell from this HandlerPool.
@@ -86,11 +85,20 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   def deregister[K <: Key[V], V](cell: Cell[K, V]): Unit =
     cellsNotDone.remove(cell)
 
+  /**
+    * Remove all completed cells from cellsNotDone. Cells are not removed on deregister, but when the queue is
+    * queried.
+    */
+  private def deregisterCompletedCells(): Unit = {
+    cellsNotDone.removeIf(_.isComplete)
+  }
+
   /** Returns all non-completed cells, when quiescence is reached. */
   def quiescentIncompleteCells: Future[Iterable[Cell[_, _]]] = {
     val p = Promise[Iterable[Cell[_, _]]]
     this.onQuiescent { () =>
-      p.success(cellsNotDone.keys)
+      deregisterCompletedCells()
+      p.success(cellsNotDone.asScala)
     }
     p.future
   }
@@ -120,7 +128,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Find one closed strongly connected component (cell)
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      deregisterCompletedCells()
+      val registered: Seq[Cell[K, V]] = this.cellsNotDone.asScala.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (registered.nonEmpty) {
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
@@ -153,7 +162,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       // Finds the rest of the unresolved cells (that have been triggered)
-      val rest = this.cellsNotDone.keys
+      deregisterCompletedCells()
+      val rest = this.cellsNotDone.asScala
         .filter(_.tasksActive())
         .asInstanceOf[Iterable[Cell[K, V]]].toSeq
       if (rest.nonEmpty) {
@@ -183,7 +193,8 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   def quiescentResolveCell[K <: Key[V], V]: Future[Boolean] = {
     val p = Promise[Boolean]
     this.onQuiescent { () =>
-      val activeCells = this.cellsNotDone.keys.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      deregisterCompletedCells()
+      val activeCells = this.cellsNotDone.asScala.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
       var resolvedCycles = false
 
       val independent = activeCells.filter(_.isIndependent())

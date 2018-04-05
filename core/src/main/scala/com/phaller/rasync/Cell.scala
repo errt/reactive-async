@@ -542,9 +542,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         true
     }
-    if (res) {
-      pool.deregister(this)
-    }
     res
   }
 
