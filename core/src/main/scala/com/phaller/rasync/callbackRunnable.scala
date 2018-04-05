@@ -26,9 +26,7 @@ private[rasync] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnC
   val sequential: Boolean
 
   /** Add this CallbackRunnable to its handler pool. */
-  def execute(): Unit =
-    try pool.execute(this)
-    catch { case NonFatal(t) => pool reportFailure t }
+  def execute(): Unit
 
   /** Essentially, call the callback. */
   override def run(): Unit
@@ -40,6 +38,11 @@ private[rasync] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnC
  */
 private[rasync] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
   override val sequential: Boolean = false
+
+  /** Add this CallbackRunnable to its handler pool such that it is run concurrently. */
+  def execute(): Unit =
+    try pool.execute(this)
+    catch { case NonFatal(t) => pool reportFailure t }
 }
 
 /**
@@ -49,6 +52,14 @@ private[rasync] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends Callbac
 private[rasync] trait SequentialCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
   override val sequential: Boolean = true
   val dependentCell: Cell[K, V]
+
+
+  /**
+    * Add this CallbackRunnable to its handler pool such that it is run sequentially.
+    * All SequentialCallbackRunnables with the same `dependentCell` are executed sequentially.
+    */
+  def execute(): Unit =
+    dependentCell.executeSequentialCallback(this)
 }
 
 /**
@@ -81,15 +92,9 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   def run(): Unit = {
     require(!started) // can't complete it twice
     started = true
-    if (sequential) {
-      dependentCell.synchronized {
-        callback(Success(otherCell.getResult()))
-      }
-    } else {
       callback(Success(otherCell.getResult()))
     }
   }
-}
 
 private[rasync] class CompleteConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCell: Cell[K, V], override val otherCell: Cell[K, V], override val callback: Try[V] => Any)
   extends CompleteCallbackRunnable[K, V](pool, dependentCell, otherCell, callback) with ConcurrentCallbackRunnable[K, V] {
@@ -170,15 +175,9 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
   extends CallbackRunnable[K, V] {
 
   def run(): Unit = {
-    if (sequential) {
-      dependentCell.synchronized {
-        callback(Success(otherCell.getResult()))
-      }
-    } else {
       callback(Success(otherCell.getResult()))
     }
   }
-}
 
 /**
  * @param pool          The handler pool that runs the callback function

@@ -1,13 +1,15 @@
 package com.phaller.rasync
 
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{ CountDownLatch, ExecutionException }
+import java.util.concurrent.{CountDownLatch, ExecutionException}
 
 import scala.annotation.tailrec
-import scala.util.{ Failure, Success, Try }
-import lattice.{ DefaultKey, Key, Updater, NotMonotonicException, PartialOrderingWithBottom }
+import scala.util.{Failure, Success, Try}
+import lattice.{DefaultKey, Key, NotMonotonicException, PartialOrderingWithBottom, Updater}
 
-trait Cell[K <: Key[V], V] {
+import scala.collection.immutable.Queue
+
+trait Cell[K <: Key[V], V] extends CellTasks[K, V] {
   private[rasync] val completer: CellCompleter[K, V]
 
   def key: K
@@ -93,9 +95,6 @@ trait Cell[K <: Key[V], V] {
   // Only used in tests.
   private[rasync] def waitUntilNoNextDeps(): Unit
 
-  private[rasync] def tasksActive(): Boolean
-  private[rasync] def setTasksActive(): Boolean
-
   private[rasync] def numTotalDependencies: Int
   private[rasync] def numNextDependencies: Int
   private[rasync] def numCompleteDependencies: Int
@@ -118,6 +117,13 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit
 
   def isADependee(): Boolean
+}
+
+trait CellTasks[K <: Key[V], V] {
+  private[rasync] def executeSequentialCallback(c: SequentialCallbackRunnable[K, V]): Unit
+
+  private[rasync] def tasksActive(): Boolean
+  private[rasync] def setTasksActive(): Boolean
 }
 
 object Cell {
@@ -180,7 +186,8 @@ private object State {
     new State[K, V](updater.bottom, false, Set(), Map(), Set(), Map())
 }
 
-private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
+private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], val init: (Cell[K, V]) => Outcome[V])
+  extends Cell[K, V] with CellCompleter[K, V] {
 
   override val completer: CellCompleter[K, V] = this.asInstanceOf[CellCompleter[K, V]]
 
@@ -196,6 +203,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    * Assumes that dependencies need to be kept until a final result is known.
    */
   private val state = new AtomicReference[AnyRef](State.empty[K, V](updater))
+  private val pendingSequentialCallbacks = new AtomicReference[Queue[SequentialCallbackRunnable[K, V]]](Queue())
 
   // `CellCompleter` and corresponding `Cell` are the same run-time object.
   override def cell: Cell[K, V] = this
@@ -221,13 +229,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   override def putFinal(x: V): Unit = {
     val res = tryComplete(Success(x))
     if (!res)
-      throw new IllegalStateException("Cell already completed.")
+      throw new IllegalStateException(s"Cell already completed with ${getResult()} when trying to put final $x.")
   }
 
   override def putNext(x: V): Unit = {
     val res = tryNewState(x)
     if (!res)
-      throw new IllegalStateException("Cell already completed.")
+      throw new IllegalStateException(s"Cell already completed with ${getResult()} when trying to put next $x.")
   }
 
   override def put(x: V, isFinal: Boolean): Unit = {
@@ -449,6 +457,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           val finalResult = finalRes.asInstanceOf[Try[V]].get
           val newVal = tryJoin(finalResult, value)
           val res = finalRes == Success(newVal)
+          if(!res) {
+            println(s"will now throw exception for: value=$value, finalResult=$finalResult, newVal=join=$newVal in updater=$updater")
+          }
           res
         } catch {
           case _: NotMonotonicException[_] => false
@@ -653,6 +664,47 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         else !pre.tasksActive
       }
     case _ => false
+  }
+
+  private[rasync] def executeSequentialCallback(callback: SequentialCallbackRunnable[K, V]): Unit = {
+    // TODO Move down
+    var success = false
+    var startCallback = false
+    while (!success) {
+      val oldCallbackQueue = pendingSequentialCallbacks.get
+      val newCallbackQueue = oldCallbackQueue.enqueue(callback)
+      success = pendingSequentialCallbacks.compareAndSet(oldCallbackQueue, newCallbackQueue)
+      startCallback = oldCallbackQueue.isEmpty
+    }
+
+    // If the list has been empty, then start execution the scheduled tasks. (Otherwise, some task is already running
+    // and the newly added task will eventually run.)
+    if (startCallback)
+      callSequentialCallback()
+  }
+
+  private def callSequentialCallback(): Unit = {
+    pool.execute(() => {
+      /*
+        Pop an element from the queue only if it is completely done!
+        That way, one can always start running sequential callbacks, if the list has been empty.
+       */
+      val task = pendingSequentialCallbacks.get().head // The queue must not be empty! Caller has to assert this.
+      task.run()
+      // The task has been run. Remove it. If the new list is not empty, callSequentialCallback(cell)
+      if (dequeueSequentialCallback().nonEmpty)
+        callSequentialCallback()
+    })
+  }
+
+  private def dequeueSequentialCallback(): Queue[SequentialCallbackRunnable[K, V]] = {
+    // remove the task that has just been finished
+    val oldCallbackQueue = pendingSequentialCallbacks.get
+    val (_, newCallbackQueue) = oldCallbackQueue.dequeue
+
+    // store the new list of tasks
+    if (pendingSequentialCallbacks.compareAndSet(oldCallbackQueue, newCallbackQueue)) newCallbackQueue
+    else dequeueSequentialCallback() // try again
   }
 
   // Schedules execution of `callback` when next intermediate result is available.
