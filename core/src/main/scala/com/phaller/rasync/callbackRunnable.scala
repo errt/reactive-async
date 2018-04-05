@@ -176,7 +176,6 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
       }
     } else {
       callback(Success(otherCell.getResult()))
-    }
   }
 }
 
