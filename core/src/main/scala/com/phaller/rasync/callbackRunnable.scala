@@ -53,11 +53,10 @@ private[rasync] trait SequentialCallbackRunnable[K <: Key[V], V] extends Callbac
   override val sequential: Boolean = true
   val dependentCell: Cell[K, V]
 
-
   /**
-    * Add this CallbackRunnable to its handler pool such that it is run sequentially.
-    * All SequentialCallbackRunnables with the same `dependentCell` are executed sequentially.
-    */
+   * Add this CallbackRunnable to its handler pool such that it is run sequentially.
+   * All SequentialCallbackRunnables with the same `dependentCell` are executed sequentially.
+   */
   def execute(): Unit =
     dependentCell.executeSequentialCallback(this)
 }
@@ -92,9 +91,9 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   def run(): Unit = {
     require(!started) // can't complete it twice
     started = true
-      callback(Success(otherCell.getResult()))
-    }
+    callback(Success(otherCell.getResult()))
   }
+}
 
 private[rasync] class CompleteConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCell: Cell[K, V], override val otherCell: Cell[K, V], override val callback: Try[V] => Any)
   extends CompleteCallbackRunnable[K, V](pool, dependentCell, otherCell, callback) with ConcurrentCallbackRunnable[K, V] {
@@ -175,9 +174,9 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
   extends CallbackRunnable[K, V] {
 
   def run(): Unit = {
-      callback(Success(otherCell.getResult()))
-    }
+    callback(Success(otherCell.getResult()))
   }
+}
 
 /**
  * @param pool          The handler pool that runs the callback function

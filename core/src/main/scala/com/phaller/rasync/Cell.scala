@@ -1,11 +1,11 @@
 package com.phaller.rasync
 
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{CountDownLatch, ExecutionException}
+import java.util.concurrent.{ CountDownLatch, ExecutionException }
 
 import scala.annotation.tailrec
-import scala.util.{Failure, Success, Try}
-import lattice.{DefaultKey, Key, NotMonotonicException, PartialOrderingWithBottom, Updater}
+import scala.util.{ Failure, Success, Try }
+import lattice.{ DefaultKey, Key, NotMonotonicException, PartialOrderingWithBottom, Updater }
 
 import scala.collection.immutable.Queue
 
@@ -457,7 +457,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           val finalResult = finalRes.asInstanceOf[Try[V]].get
           val newVal = tryJoin(finalResult, value)
           val res = finalRes == Success(newVal)
-          if(!res) {
+          if (!res) {
             println(s"will now throw exception for: value=$value, finalResult=$finalResult, newVal=join=$newVal in updater=$updater")
           }
           res
