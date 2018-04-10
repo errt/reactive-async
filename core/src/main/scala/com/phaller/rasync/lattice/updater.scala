@@ -7,8 +7,6 @@ trait Updater[V] {
   def ignoreIfFinal(): Boolean = false
 }
 
-trait StructuredUpdater[V] extends Updater[V]
-
 class AggregationUpdater[V](val lattice: Lattice[V]) extends Updater[V] {
   override val initial: V = lattice.bottom
   override def update(current: V, next: V): V = lattice.join(current, next)
