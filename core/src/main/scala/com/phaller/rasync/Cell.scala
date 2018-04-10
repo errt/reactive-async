@@ -177,7 +177,7 @@ private class State[K <: Key[V], V](
 
 private object State {
   def empty[K <: Key[V], V](updater: Updater[V]): State[K, V] =
-    new State[K, V](updater.bottom, false, Set(), Map(), Set(), Map())
+    new State[K, V](updater.initial, false, Set(), Map(), Set(), Map())
 }
 
 private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
@@ -445,13 +445,19 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   private[rasync] final def tryNewState(value: V): Boolean = {
     state.get() match {
       case finalRes: Try[_] => // completed with final result already
-        try {
-          val finalResult = finalRes.asInstanceOf[Try[V]].get
-          val newVal = tryJoin(finalResult, value)
-          val res = finalRes == Success(newVal)
-          res
-        } catch {
-          case _: NotMonotonicException[_] => false
+        if (!updater.ignoreIfFinal()) {
+          // Check, if the incoming result would have changed the final result.
+          try {
+            val finalResult = finalRes.asInstanceOf[Try[V]].get
+            val newVal = tryJoin(finalResult, value)
+            val res = finalRes == Success(newVal)
+            res
+          } catch {
+            case _: NotMonotonicException[_] => false
+          }
+        } else {
+          // Do not check anything, if we are final already
+          true
         }
       case raw: State[_, _] => // not completed
         val current = raw.asInstanceOf[State[K, V]]
@@ -497,10 +503,21 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     // the only call to `tryCompleteAndGetState`
     val res = tryCompleteAndGetState(resolved) match {
       case finalRes: Try[_] => // was already complete
-        val finalResult = finalRes.asInstanceOf[Try[V]].get
-        val newVal = value.map(tryJoin(finalResult, _))
-        val res = finalRes == newVal
-        res
+
+        if (!updater.ignoreIfFinal()) {
+          // Check, if the incoming result would have changed the final result.
+          try {
+            val finalResult = finalRes.asInstanceOf[Try[V]].get
+            val newVal = value.map(tryJoin(finalResult, _))
+            val res = finalRes == newVal
+            res
+          } catch {
+            case _: NotMonotonicException[_] => false
+          }
+        } else {
+          // Do not check anything, if we are final already
+          true
+        }
 
       case (pre: State[K, V], newVal: Try[V]) =>
         val nextCallbacks = pre.nextCallbacks
@@ -707,7 +724,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case false => new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks + (runnable.dependentCell -> List(runnable)))
         }
         if (!state.compareAndSet(pre, newState)) dispatchOrAddNextCallback(runnable)
-        else if (current.res != updater.bottom) runnable.execute()
+        else if (current.res != updater.initial) runnable.execute()
     }
   }
 

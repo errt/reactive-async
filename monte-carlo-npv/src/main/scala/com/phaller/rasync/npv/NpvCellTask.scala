@@ -26,7 +26,7 @@ abstract class AbstractNpvTask extends Runnable {
 
 // trivial lattice
 class StatsLattice extends Lattice[StatsCollector] {
-  override def bottom: StatsCollector = null
+  override val bottom: StatsCollector = null
   override def join(current: StatsCollector, next: StatsCollector): StatsCollector = {
     if (current == null) next
     else throw NotMonotonicException(current, next)

@@ -1271,7 +1271,7 @@ class BaseSuite extends FunSuite {
 
     implicit val setLattice = new Lattice[Set[Int]] {
       def join(curr: Set[Int], v2: Set[Int]): Set[Int] = curr ++ v2
-      def bottom = Set.empty[Int]
+      val bottom = Set.empty[Int]
     }
     val key = new lattice.DefaultKey[Set[Int]]
 
@@ -1298,7 +1298,7 @@ class BaseSuite extends FunSuite {
 
     implicit val setLattice = new Lattice[Set[Int]] {
       def join(curr: Set[Int], v2: Set[Int]): Set[Int] = curr ++ v2
-      def bottom = Set.empty[Int]
+      val bottom = Set.empty[Int]
     }
     val key = new lattice.DefaultKey[Set[Int]]
 
@@ -1396,35 +1396,35 @@ class BaseSuite extends FunSuite {
     assert(res == ConditionallyImmutable)
   }
 
-  test("PurityUpdate: successful updated") {
-    val lattice = Purity.PurityUpdater
-
-    val purity = lattice.update(UnknownPurity, Pure)
-    assert(purity == Pure)
-
-    val newPurity = lattice.update(purity, Pure)
-    assert(newPurity == Pure)
-  }
-
-  test("PurityUpdater: failed updates") {
-    val lattice = Purity.PurityUpdater
-
-    try {
-      val newPurity = lattice.update(Impure, Pure)
-      assert(false)
-    } catch {
-      case lve: NotMonotonicException[_] => assert(true)
-      case e: Exception => assert(false)
-    }
-
-    try {
-      val newPurity = lattice.update(Pure, Impure)
-      assert(false)
-    } catch {
-      case lve: NotMonotonicException[_] => assert(true)
-      case e: Exception => assert(false)
-    }
-  }
+  //  test("PurityUpdate: successful updated") {
+  //    val lattice = Purity.PurityUpdater
+  //
+  //    val purity = lattice.update(UnknownPurity, Pure)
+  //    assert(purity == Pure)
+  //
+  //    val newPurity = lattice.update(purity, Pure)
+  //    assert(newPurity == Pure)
+  //  }
+  //
+  //  test("PurityUpdater: failed updates") {
+  //    val lattice = Purity.PurityUpdater
+  //
+  //    try {
+  //      val newPurity = lattice.update(Impure, Pure)
+  //      assert(false)
+  //    } catch {
+  //      case lve: NotMonotonicException[_] => assert(true)
+  //      case e: Exception => assert(false)
+  //    }
+  //
+  //    try {
+  //      val newPurity = lattice.update(Pure, Impure)
+  //      assert(false)
+  //    } catch {
+  //      case lve: NotMonotonicException[_] => assert(true)
+  //      case e: Exception => assert(false)
+  //    }
+  //  }
 
   test("putNext: Successful, using ImmutabilityLattce") {
     implicit val pool = new HandlerPool
@@ -1604,7 +1604,7 @@ class BaseSuite extends FunSuite {
   test("if exception-throwing tasks should still run quiescent handlers") {
     implicit val intMaxLattice: Lattice[Int] = new Lattice[Int] {
       override def join(v1: Int, v2: Int): Int = Math.max(v1, v2)
-      def bottom = 0
+      val bottom = 0
     }
     val key = new lattice.DefaultKey[Int]
 
@@ -1821,11 +1821,9 @@ class BaseSuite extends FunSuite {
     case object Bottom extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = true
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     implicit val pool = new HandlerPool
@@ -1854,11 +1852,9 @@ class BaseSuite extends FunSuite {
     case object Bottom extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = true
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     implicit val pool = new HandlerPool
@@ -1888,11 +1884,9 @@ class BaseSuite extends FunSuite {
     case object OK extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = v1 == bottom
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = if (v1 == Bottom) v2 else v1 // TODO or throw?
+      override val initial: Value = Bottom
     }
 
     object TheKey extends DefaultKey[Value] {
@@ -1928,11 +1922,9 @@ class BaseSuite extends FunSuite {
     case object OK extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = v1 == bottom
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     object TheKey extends DefaultKey[Value] {
@@ -1970,11 +1962,9 @@ class BaseSuite extends FunSuite {
     case object OK extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = true
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     object TheKey extends DefaultKey[Value] {
@@ -2019,11 +2009,9 @@ class BaseSuite extends FunSuite {
     case object OK extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = true
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     object TheKey extends DefaultKey[Value] {
@@ -2068,11 +2056,9 @@ class BaseSuite extends FunSuite {
     case object OK extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = true
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     object TheKey extends DefaultKey[Value] {
@@ -2117,11 +2103,9 @@ class BaseSuite extends FunSuite {
     case object OK extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = true
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     object TheKey extends DefaultKey[Value] {
@@ -2163,11 +2147,9 @@ class BaseSuite extends FunSuite {
     case object OK extends Value
     case object ShouldNotHappen extends Value
 
-    object Value {
-      implicit object ValueUpdater extends MonotonicUpdater[Value] {
-        override def lteq(v1: Value, v2: Value): Boolean = true
-        override val bottom: Value = Bottom
-      }
+    implicit object ValueUpdater extends Updater[Value] {
+      override def update(v1: Value, v2: Value): Value = v2
+      override val initial: Value = Bottom
     }
 
     object TheKey extends DefaultKey[Value] {
@@ -2386,7 +2368,7 @@ class BaseSuite extends FunSuite {
   test("whenComplete: called at most once") {
     implicit val intMaxLattice: Lattice[Int] = new Lattice[Int] {
       override def join(x: Int, y: Int): Int = Math.max(x, y)
-      def bottom = 0
+      val bottom = 0
     }
     val key = new lattice.DefaultKey[Int]
 
