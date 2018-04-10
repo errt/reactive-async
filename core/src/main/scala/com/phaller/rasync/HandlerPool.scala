@@ -1,16 +1,15 @@
 package com.phaller.rasync
 
-import java.util.concurrent.{ConcurrentLinkedQueue, ForkJoinPool}
+import java.util.concurrent.{ ConcurrentLinkedQueue, ForkJoinPool }
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
-import scala.concurrent.{Await, Future, Promise}
+import scala.concurrent.{ Await, Future, Promise }
 import scala.concurrent.duration._
-import lattice.{DefaultKey, Key, Updater}
+import lattice.{ DefaultKey, Key, Updater }
 import org.opalj.graphs._
 import scala.collection.JavaConverters._
-
 
 /* Need to have reference equality for CAS.
  */
@@ -86,9 +85,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     cellsNotDone.remove(cell)
 
   /**
-    * Remove all completed cells from cellsNotDone. Cells are not removed on deregister, but when the queue is
-    * queried.
-    */
+   * Remove all completed cells from cellsNotDone. Cells are not removed on deregister, but when the queue is
+   * queried.
+   */
   private def deregisterCompletedCells(): Unit = {
     cellsNotDone.removeIf(_.isComplete)
   }
