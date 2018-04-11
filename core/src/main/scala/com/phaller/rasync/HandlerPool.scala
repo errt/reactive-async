@@ -241,8 +241,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         override def run(): Unit = {
           // Remove all callbacks that target other cells of this set.
           // The result of those cells is explicitely given in `results`.
-          results.foreach( cv =>  {c.removeAllCallbacks(cv._1)} )
-
+          c.removeAllCallbacks(results.map(_._1))
           // we can now safely put a final value
           c.resolveWithValue(v)
         }
