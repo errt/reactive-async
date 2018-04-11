@@ -20,14 +20,15 @@ object StringIntKey {
     new StringIntKey(s)
 }
 
-class StringIntUpdater extends Updater[Int] with PartialOrderingWithBottom[Int] {
+class StringIntUpdater extends Updater[Int] {
   override def update(v1: Int, v2: Int): Int =
     if (v1 != v2) v2
     else v1
 
-  override val bottom: Int = 0
-  override val initial: Int = bottom
+  override val initial: Int = 0
 
-  override def lteq(x: Int, y: Int): Boolean = x <= y
+  // This updater needs to ignore inputs on final cells,
+  // because its update method is not based on an ordering
+  override val ignoreIfFinal = true
 }
 
