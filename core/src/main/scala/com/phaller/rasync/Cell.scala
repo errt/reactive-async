@@ -171,14 +171,14 @@ object Cell {
 private class State[K <: Key[V], V](
   val res: V,
   val tasksActive: Boolean,
-  val completeDeps: Set[Cell[K, V]],
+  val completeDeps: List[Cell[K, V]],
   val completeCallbacks: Map[Cell[K, V], List[CompleteCallbackRunnable[K, V]]],
-  val nextDeps: Set[Cell[K, V]],
+  val nextDeps: List[Cell[K, V]],
   val nextCallbacks: Map[Cell[K, V], List[NextCallbackRunnable[K, V]]])
 
 private object State {
   def empty[K <: Key[V], V](updater: Updater[V]): State[K, V] =
-    new State[K, V](updater.initial, false, Set(), Map(), Set(), Map())
+    new State[K, V](updater.initial, false, List(), Map(), List(), Map())
 }
 
 private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
@@ -277,7 +277,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   override private[rasync] def numTotalDependencies: Int = {
     val current = currentState()
     if (current == null) 0
-    else (current.completeDeps ++ current.nextDeps).size
+    else (current.completeDeps ++ current.nextDeps).toSet.size
   }
 
   override def cellDependencies: Seq[Cell[K, V]] = {
@@ -370,7 +370,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           val depRegistered =
             if (current.nextDeps.contains(other)) true
             else {
-              val newState = new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps + other, current.nextCallbacks)
+              val newState = new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, other :: current.nextDeps, current.nextCallbacks)
               state.compareAndSet(current, newState)
             }
           if (depRegistered) {
@@ -408,7 +408,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           val depRegistered =
             if (current.completeDeps.contains(other)) true
             else {
-              val newState = new State(current.res, current.tasksActive, current.completeDeps + other, current.completeCallbacks, current.nextDeps, current.nextCallbacks)
+              val newState = new State(current.res, current.tasksActive, other :: current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks)
               state.compareAndSet(current, newState)
             }
           if (depRegistered) {
@@ -551,7 +551,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     state.get() match {
       case pre: State[_, _] =>
         val current = pre.asInstanceOf[State[K, V]]
-        val newDeps = current.completeDeps - cell
+        val newDeps = current.completeDeps.filterNot(_ == cell)
 
         val newState = new State(current.res, current.tasksActive, newDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks)
         if (!state.compareAndSet(current, newState))
@@ -568,7 +568,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     state.get() match {
       case pre: State[_, _] =>
         val current = pre.asInstanceOf[State[K, V]]
-        val newNextDeps = current.nextDeps - cell
+        val newNextDeps = current.nextDeps.filterNot(_ == cell)
 
         val newState = new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, newNextDeps, current.nextCallbacks)
         if (!state.compareAndSet(current, newState))
