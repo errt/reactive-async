@@ -128,10 +128,10 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     this.onQuiescent { () =>
       // Find one closed strongly connected component (cell)
       deregisterCompletedCells()
-      val registered: Seq[Cell[K, V]] = this.cellsNotDone.asScala.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val registered = this.cellsNotDone.asScala.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]]
       if (registered.nonEmpty) {
         val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
-        cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
+        cSCCs.foreach(resolveCycle)
 
         // Wait again for quiescent state. It's possible that other tasks where scheduled while
         // resolving the cells.
@@ -164,7 +164,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
       deregisterCompletedCells()
       val rest = this.cellsNotDone.asScala
         .filter(_.tasksActive())
-        .asInstanceOf[Iterable[Cell[K, V]]].toSeq
+        .asInstanceOf[Iterable[Cell[K, V]]]
       if (rest.nonEmpty) {
         resolveDefault(rest)
 
@@ -193,7 +193,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     val p = Promise[Boolean]
     this.onQuiescent { () =>
       deregisterCompletedCells()
-      val activeCells = this.cellsNotDone.asScala.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]].toSeq
+      val activeCells = this.cellsNotDone.asScala.filter(_.tasksActive()).asInstanceOf[Iterable[Cell[K, V]]]
       var resolvedCycles = false
 
       val independent = activeCells.filter(_.isIndependent())
@@ -206,7 +206,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
         // Find closed strongly connected component (cell)
         if (activeCells.nonEmpty) {
           val cSCCs = closedSCCs(activeCells, (cell: Cell[K, V]) => cell.totalCellDependencies)
-          cSCCs.foreach(cSCC => resolveCycle(cSCC.asInstanceOf[Seq[Cell[K, V]]]))
+          cSCCs.foreach(resolveCycle)
           resolvedCycles = cSCCs.nonEmpty
         }
       }
@@ -225,17 +225,17 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   /**
    * Resolves a cycle of unfinished cells via the key's `resolve` method.
    */
-  private def resolveCycle[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
+  private def resolveCycle[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit =
     resolve(cells.head.key.resolve(cells))
 
   /**
    * Resolves a cell with default value with the key's `fallback` method.
    */
-  private def resolveDefault[K <: Key[V], V](cells: Seq[Cell[K, V]]): Unit =
+  private def resolveDefault[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit =
     resolve(cells.head.key.fallback(cells))
 
   /** Resolve all cells with the associated value. */
-  private def resolve[K <: Key[V], V](results: Seq[(Cell[K, V], V)]): Unit = {
+  private def resolve[K <: Key[V], V](results: Iterable[(Cell[K, V], V)]): Unit = {
     for ((c, v) <- results)
       execute(new Runnable {
         override def run(): Unit = {
