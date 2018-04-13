@@ -236,7 +236,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   /** Resolve all cells with the associated value. */
   private def resolve[K <: Key[V], V](results: Iterable[(Cell[K, V], V)]): Unit = {
-    val cells = results.map(_._1).toSeq
+    val cells = results.map(_._1)
     for ((c, v) <- results)
       execute(new Runnable {
         override def run(): Unit =
