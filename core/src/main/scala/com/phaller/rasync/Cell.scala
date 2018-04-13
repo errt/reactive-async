@@ -107,7 +107,7 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def addCompleteCallback(callback: CompleteCallbackRunnable[K, V], cell: Cell[K, V]): Unit
   private[rasync] def addNextCallback(callback: NextCallbackRunnable[K, V], cell: Cell[K, V]): Unit
 
-  private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[K, V]]): Unit
+  private[rasync] def resolveWithValue(value: V, dontCall: Iterable[Cell[K, V]]): Unit
   def cellDependencies: Seq[Cell[K, V]]
   def totalCellDependencies: Seq[Cell[K, V]]
   def isIndependent(): Boolean
@@ -330,7 +330,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[K, V]]): Unit = {
+  override private[rasync] def resolveWithValue(value: V, dontCall: Iterable[Cell[K, V]]): Unit = {
     val res = tryComplete(Success(value), dontCall)
     if (!res)
       throw new IllegalStateException("Cell already completed.")
@@ -548,7 +548,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     res
   }
 
-  private def tryComplete(value: Try[V], dontCall: Seq[Cell[K, V]]): Boolean = {
+  private def tryComplete(value: Try[V], dontCall: Iterable[Cell[K, V]]): Boolean = {
     val resolved: Try[V] = resolveTry(value)
 
     val res = tryCompleteAndGetState(resolved) match {
@@ -562,16 +562,18 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val nextCallbacks = pre.nextCallbacks
         val completeCallbacks = pre.completeCallbacks
 
+        val dontCallList = dontCall.toList
+
         if (nextCallbacks.nonEmpty)
           nextCallbacks.foreach {
-            case (cell, callbacks) if !dontCall.contains(cell) =>
+            case (cell, callbacks) if !dontCallList.contains(cell) =>
               callbacks.foreach(callback => callback.execute())
             case _ => /* */
           }
 
         if (completeCallbacks.nonEmpty)
           completeCallbacks.foreach {
-            case (cell, callbacks) if !dontCall.contains(cell) =>
+            case (cell, callbacks) if !dontCallList.contains(cell) =>
               callbacks.foreach(callback => callback.execute())
             case _ => /* */
           }
