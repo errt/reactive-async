@@ -107,7 +107,7 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def addCompleteCallback(callback: CompleteCallbackRunnable[K, V], cell: Cell[K, V]): Unit
   private[rasync] def addNextCallback(callback: NextCallbackRunnable[K, V], cell: Cell[K, V]): Unit
 
-  private[rasync] def resolveWithValue(value: V): Unit
+  private[rasync] def resolveWithValue(value: V, dontCall: Iterable[Cell[K, V]]): Unit
   def cellDependencies: Seq[Cell[K, V]]
   def totalCellDependencies: Seq[Cell[K, V]]
   def isIndependent(): Boolean
@@ -330,6 +330,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
+  override private[rasync] def resolveWithValue(value: V, dontCall: Iterable[Cell[K, V]]): Unit = {
+    val res = tryComplete(Success(value), dontCall)
+    if (!res)
+      throw new IllegalStateException("Cell already completed.")
+  }
+
   override private[rasync] def resolveWithValue(value: V): Unit = {
     this.putFinal(value)
   }
@@ -545,6 +551,44 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
     res
   }
+
+  private def tryComplete(value: Try[V], dontCall: Iterable[Cell[K, V]]): Boolean = {
+    val resolved: Try[V] = resolveTry(value)
+
+    val res = tryCompleteAndGetState(resolved) match {
+      case finalRes: Try[_] => // was already complete
+        val finalResult = finalRes.asInstanceOf[Try[V]].get
+        val newVal = value.map(tryJoin(finalResult, _))
+        val res = finalRes == newVal
+        res
+
+      case pre: State[K, V] =>
+        val nextCallbacks = pre.nextCallbacks -- dontCall
+        val completeCallbacks = pre.completeCallbacks -- dontCall
+
+        if (nextCallbacks.nonEmpty)
+          nextCallbacks.values.foreach { callbacks =>
+              callbacks.foreach(callback => callback.execute())
+          }
+
+        if (completeCallbacks.nonEmpty)
+          completeCallbacks.values.foreach { callbacks =>
+              callbacks.foreach(callback => callback.execute())
+          }
+
+        val depsCells = pre.completeDeps
+        val nextDepsCells = pre.nextDeps
+
+        if (depsCells.nonEmpty)
+          depsCells.foreach(_.removeCompleteCallbacks(this))
+        if (nextDepsCells.nonEmpty)
+          nextDepsCells.foreach(_.removeNextCallbacks(this))
+
+        true
+    }
+    res
+  }
+
 
   @tailrec
   override private[rasync] final def removeDep(cell: Cell[K, V]): Unit = {
