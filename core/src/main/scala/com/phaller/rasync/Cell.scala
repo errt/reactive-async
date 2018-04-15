@@ -78,7 +78,7 @@ trait Cell[K <: Key[V], V] {
   def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
   def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
 
-  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
+//  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
 
   // internal API
 
@@ -128,35 +128,35 @@ object Cell {
     completer.cell
   }
 
-  def sequence[K <: Key[V], V](in: List[Cell[K, V]])(implicit pool: HandlerPool): Cell[DefaultKey[List[V]], List[V]] = {
-    implicit val updater: Updater[List[V]] = Updater.partialOrderingToUpdater(PartialOrderingWithBottom.trivial[List[V]])
-    val completer =
-      CellCompleter[DefaultKey[List[V]], List[V]](new DefaultKey[List[V]])
-    in match {
-      case List(c) =>
-        c.onComplete {
-          case Success(x) =>
-            completer.putFinal(List(x))
-          case f @ Failure(_) =>
-            completer.tryComplete(f.asInstanceOf[Failure[List[V]]])
-        }
-      case c :: cs =>
-        val fst = in.head
-        fst.onComplete {
-          case Success(x) =>
-            val tailCell = sequence(in.tail)
-            tailCell.onComplete {
-              case Success(xs) =>
-                completer.putFinal(x :: xs)
-              case f @ Failure(_) =>
-                completer.tryComplete(f)
-            }
-          case f @ Failure(_) =>
-            completer.tryComplete(f.asInstanceOf[Failure[List[V]]])
-        }
-    }
-    completer.cell
-  }
+//  def sequence[K <: Key[V], V](in: List[Cell[K, V]])(implicit pool: HandlerPool): Cell[DefaultKey[List[V]], List[V]] = {
+//    implicit val updater: Updater[List[V]] = Updater.partialOrderingToUpdater(PartialOrderingWithBottom.trivial[List[V]])
+//    val completer =
+//      CellCompleter[DefaultKey[List[V]], List[V]](new DefaultKey[List[V]])
+//    in match {
+//      case List(c) =>
+//        c.onComplete {
+//          case Success(x) =>
+//            completer.putFinal(List(x))
+//          case f @ Failure(_) =>
+//            completer.tryComplete(f.asInstanceOf[Failure[List[V]]])
+//        }
+//      case c :: cs =>
+//        val fst = in.head
+//        fst.onComplete {
+//          case Success(x) =>
+//            val tailCell = sequence(in.tail)
+//            tailCell.onComplete {
+//              case Success(xs) =>
+//                completer.putFinal(x :: xs)
+//              case f @ Failure(_) =>
+//                completer.tryComplete(f)
+//            }
+//          case f @ Failure(_) =>
+//            completer.tryComplete(f.asInstanceOf[Failure[List[V]]])
+//        }
+//    }
+//    completer.cell
+//  }
 
 }
 
@@ -220,7 +220,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override def putFinal(x: V): Unit = {
-    val res = tryComplete(Success(x))
+    val res = tryComplete(x)
     if (!res)
       throw new IllegalStateException("Cell already completed.")
   }
@@ -236,23 +236,23 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     else putNext(x)
   }
 
-  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)] = {
-    implicit val theUpdater: Updater[V] = updater
-    val completer =
-      CellCompleter[DefaultKey[(V, V)], (V, V)](new DefaultKey[(V, V)])(Updater.pair(updater), pool)
-    this.onComplete {
-      case Success(x) =>
-        that.onComplete {
-          case Success(y) =>
-            completer.putFinal((x, y))
-          case f @ Failure(_) =>
-            completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
-        }
-      case f @ Failure(_) =>
-        completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
-    }
-    completer.cell
-  }
+//  def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)] = {
+//    implicit val theUpdater: Updater[V] = updater
+//    val completer =
+//      CellCompleter[DefaultKey[(V, V)], (V, V)](new DefaultKey[(V, V)])(Updater.pair(updater), pool)
+//    this.onComplete {
+//      case Success(x) =>
+//        that.onComplete {
+//          case Success(y) =>
+//            completer.putFinal((x, y))
+//          case f @ Failure(_) =>
+//            completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+//        }
+//      case f @ Failure(_) =>
+//        completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+//    }
+//    completer.cell
+//  }
 
   private[this] def currentState(): State[K, V] =
     state.get() match {
@@ -331,7 +331,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override private[rasync] def resolveWithValue(value: V, dontCall: Iterable[Cell[K, V]]): Unit = {
-    val res = tryComplete(Success(value), dontCall)
+    val res = tryComplete(value, dontCall)
     if (!res)
       throw new IllegalStateException("Cell already completed.")
   }
@@ -486,11 +486,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    */
   // TODO: take care of compressing root (as in impl.Promise.DefaultPromise)
   @tailrec
-  private def tryCompleteAndGetState(v: Try[V]): AnyRef = {
+  private def tryCompleteAndGetState(v:V): AnyRef = {
     state.get() match {
       case current: State[_, _] =>
         val currentState = current.asInstanceOf[State[K, V]]
-        val newVal = Success(tryJoin(currentState.res, v.get))
+        val newVal = Success(tryJoin(currentState.res, v))
         if (state.compareAndSet(current, newVal))
           currentState
         else
@@ -500,19 +500,17 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override def tryComplete(value: Try[V]): Boolean = {
-    val resolved: Try[V] = resolveTry(value)
-
+  override def tryComplete(value: V): Boolean = {
     // the only call to `tryCompleteAndGetState`
-    val res = tryCompleteAndGetState(resolved) match {
+    val res = tryCompleteAndGetState(value) match {
       case finalRes: Try[_] => // was already complete
 
         if (!updater.ignoreIfFinal()) {
           // Check, if the incoming result would have changed the final result.
           try {
             val finalResult = finalRes.asInstanceOf[Try[V]].get
-            val newVal = value.map(tryJoin(finalResult, _))
-            val res = finalRes == newVal
+            val newVal = tryJoin(finalResult, value)
+            val res = finalResult == newVal
             res
           } catch {
             case _: NotMonotonicException[_] => false
@@ -548,14 +546,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     res
   }
 
-  private def tryComplete(value: Try[V], dontCall: Iterable[Cell[K, V]]): Boolean = {
-    val resolved: Try[V] = resolveTry(value)
-
-    val res = tryCompleteAndGetState(resolved) match {
+  private def tryComplete(value: V, dontCall: Iterable[Cell[K, V]]): Boolean = {
+    val res = tryCompleteAndGetState(value) match {
       case finalRes: Try[_] => // was already complete
         val finalResult = finalRes.asInstanceOf[Try[V]].get
-        val newVal = value.map(tryJoin(finalResult, _))
-        val res = finalRes == newVal
+        val newVal = tryJoin(finalResult, value)
+        val res = finalResult == newVal
         res
 
       case pre: State[K, V] =>
