@@ -15,6 +15,11 @@ class BaseSuite extends FunSuite {
   implicit val stringIntUpdater: Updater[Int] = new StringIntUpdater
 
   test("putFinal") {
+    def g1(o: Object): Unit = {}
+    def g2(o: String): Unit = {}
+    var f: String => Unit = (s: String) => ()
+    f = (o: Object) => ()
+
     val latch = new CountDownLatch(1)
 
     implicit val pool = new HandlerPool
