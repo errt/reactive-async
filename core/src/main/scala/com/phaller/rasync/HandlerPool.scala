@@ -226,22 +226,24 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * Resolves a cycle of unfinished cells via the key's `resolve` method.
    */
   private def resolveCycle[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit =
-    resolve(cells.head.key.resolve(cells))
+    resolve(cells.head.key.resolve(cells), true)
 
   /**
    * Resolves a cell with default value with the key's `fallback` method.
    */
   private def resolveDefault[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit =
-    resolve(cells.head.key.fallback(cells))
+    resolve(cells.head.key.fallback(cells), false)
 
   /** Resolve all cells with the associated value. */
-  private def resolve[K <: Key[V], V](results: Iterable[(Cell[K, V], V)]): Unit = {
+  private def resolve[K <: Key[V], V](results: Iterable[(Cell[K, V], V)], rac: Boolean): Unit = {
+    val cells = results.map(_._1)
     for ((c, v) <- results)
       execute(new Runnable {
         override def run(): Unit = {
           // Remove all callbacks that target other cells of this set.
           // The result of those cells is explicitely given in `results`.
-          c.removeAllCallbacks(results.map(_._1))
+          if (rac)
+            c.removeAllCallbacks(cells)
           // we can now safely put a final value
           c.resolveWithValue(v)
         }
