@@ -108,6 +108,8 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def addNextCallback(callback: NextCallbackRunnable[K, V], cell: Cell[K, V]): Unit
 
   private[rasync] def resolveWithValue(value: V, dontCall: Iterable[Cell[K, V]]): Unit
+  private[rasync] def resolveWithValue(value: V): Unit
+
   def cellDependencies: Seq[Cell[K, V]]
   def totalCellDependencies: Seq[Cell[K, V]]
   def isIndependent(): Boolean
@@ -345,7 +347,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     this.whenComplete(other, valueCallback(_, true))
   }
 
-  override def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
+  override def whenSequäential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
     this.whenNextSequential(other, valueCallback(_, false))
     this.whenCompleteSequential(other, valueCallback(_, true))
   }
