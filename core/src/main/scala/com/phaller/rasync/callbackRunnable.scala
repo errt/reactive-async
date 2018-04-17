@@ -329,7 +329,7 @@ private[rasync] abstract class CombinedDepRunnable[K <: Key[V], V](
     // Copied from NextDepRunnable
     t match {
       case Success(_) =>
-        valueCallback(otherCell.getResult(), true) match {
+        valueCallback(otherCell.getResult(), false) match {
           case NextOutcome(v) =>
             dependentCompleter.putNext(v)
           case FinalOutcome(v) =>
