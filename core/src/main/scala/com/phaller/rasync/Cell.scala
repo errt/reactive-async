@@ -20,14 +20,6 @@ trait Cell[K <: Key[V], V] {
    */
   def getResult(): V
 
-  /**
-   * Returns the current value of `this` `Cell` and its `completeness`.
-   *
-   * Note that this method may return non-deterministic values. To ensure
-   * deterministic executions use the quiescence API of class `HandlerPool`.
-   */
-  def getState(): (V, Boolean)
-
   /** Start computations associated with this cell. */
   def trigger(): Unit
 
@@ -101,6 +93,9 @@ trait Cell[K <: Key[V], V] {
   // Only used in tests.
   private[rasync] def waitUntilNoNextDeps(): Unit
 
+  // Only used in tests.
+  private[rasync] def waitUntilNoCombinedDeps(): Unit
+
   private[rasync] def tasksActive(): Boolean
   private[rasync] def setTasksActive(): Boolean
 
@@ -122,6 +117,7 @@ trait Cell[K <: Key[V], V] {
 
   def removeCompleteCallbacks(cell: Cell[K, V]): Unit
   def removeNextCallbacks(cell: Cell[K, V]): Unit
+  def removeCombinedCallbacks(cell: Cell[K, V]): Unit
 
   private[rasync] def removeAllCallbacks(cell: Cell[K, V]): Unit
   private[rasync] def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit
@@ -199,6 +195,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   private val nodepslatch = new CountDownLatch(1)
   private val nonextdepslatch = new CountDownLatch(1)
+  private val nocombineddepslatch = new CountDownLatch(1)
 
   /* Contains a value either of type
    * (a) `Try[V]`      for the final result, or
@@ -218,15 +215,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         case Failure(err) => throw new IllegalStateException(err)
       }
     case raw: State[K, V] => raw.res
-  }
-
-  override def getState(): (V, Boolean) = state.get() match {
-    case finalRes: Try[V] =>
-      finalRes match {
-        case Success(result) => (result, true)
-        case Failure(err) => throw new IllegalStateException(err)
-      }
-    case raw: State[K, V] => (raw.res, false)
   }
 
   override def trigger(): Unit = {
@@ -578,11 +566,14 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         val depsCells = pre.completeDeps
         val nextDepsCells = pre.nextDeps
+        val combinedDepsCells = pre.combinedDeps
 
         if (depsCells.nonEmpty)
           depsCells.foreach(_.removeCompleteCallbacks(this))
         if (nextDepsCells.nonEmpty)
           nextDepsCells.foreach(_.removeNextCallbacks(this))
+        if (combinedDepsCells.nonEmpty)
+          combinedDepsCells.foreach(_.removeCombinedCallbacks(this))
 
         true
     }
@@ -627,6 +618,24 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   @tailrec
+  override private[rasync] final def removeCombinedDep(cell: Cell[K, V]): Unit = {
+    state.get() match {
+      case pre: State[_, _] =>
+        val current = pre.asInstanceOf[State[K, V]]
+        val newCombinedDeps = current.combinedDeps.filterNot(_ == cell)
+
+        val newState = new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks, newCombinedDeps, current.combinedCallbacks)
+        if (!state.compareAndSet(current, newState))
+          removeCombinedDep(cell)
+        else if (newCombinedDeps.isEmpty)
+          nocombineddepslatch.countDown()
+
+      case _ => /* do nothing */
+    }
+  }
+
+
+  @tailrec
   override final def removeCompleteCallbacks(cell: Cell[K, V]): Unit = {
     state.get() match {
       case pre: State[_, _] =>
@@ -653,6 +662,21 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       case _ => /* do nothing */
     }
   }
+
+  @tailrec
+  override final def removeCombinedCallbacks(cell: Cell[K, V]): Unit = {
+    state.get() match {
+      case pre: State[_, _] =>
+        val current = pre.asInstanceOf[State[K, V]]
+        val newCombinedCallbacks = current.combinedCallbacks - cell
+
+        val newState = new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks, current.combinedDeps, newCombinedCallbacks)
+        if (!state.compareAndSet(current, newState))
+          removeCombinedCallbacks(cell)
+      case _ => /* do nothing */
+    }
+  }
+
 
   @tailrec
   override private[rasync] final def removeAllCallbacks(cell: Cell[K, V]): Unit = {
@@ -690,6 +714,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   override private[rasync] def waitUntilNoNextDeps(): Unit = {
     nonextdepslatch.await()
+  }
+
+  override private[rasync] def waitUntilNoCombinedDeps(): Unit = {
+    nocombineddepslatch.await()
   }
 
   override private[rasync] def tasksActive() = state.get() match {
@@ -786,7 +814,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       case pre: State[_, _] =>
         // assemble new state
         val current = pre.asInstanceOf[State[K, V]]
-        val newState = current.nextCallbacks.contains(runnable.dependentCell) match {
+        val newState = current.combinedCallbacks.contains(runnable.dependentCell) match {
           case true => new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks, current.combinedDeps, current.combinedCallbacks + (runnable.dependentCell -> (runnable :: current.combinedCallbacks(runnable.dependentCell))))
           case false => new State(current.res, current.tasksActive, current.completeDeps, current.completeCallbacks, current.nextDeps, current.nextCallbacks, current.combinedDeps, current.combinedCallbacks + (runnable.dependentCell -> List(runnable)))
         }
