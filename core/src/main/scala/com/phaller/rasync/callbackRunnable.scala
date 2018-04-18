@@ -131,13 +131,16 @@ private[rasync] abstract class CompleteDepRunnable[K <: Key[V], V](
         dependentCompleter.putNext(v)
         dependentCompleter.removeDep(otherCell)
         dependentCompleter.removeNextDep(otherCell)
+        dependentCompleter.removeCombinedDep(otherCell)
       case NoOutcome =>
         dependentCompleter.removeDep(otherCell)
         dependentCompleter.removeNextDep(otherCell)
+        dependentCompleter.removeCombinedDep(otherCell)
     }
   case Failure(_) =>
     dependentCompleter.removeDep(otherCell)
     dependentCompleter.removeNextDep(otherCell)
+    dependentCompleter.removeCombinedDep(otherCell)
 }) with SingleDependency[K, V]
 
 /**
@@ -282,8 +285,19 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
   extends CallbackRunnable[K, V] {
 
   def run(): Unit = {
-    val state = otherCell.getState()
-    callback(Success(state._1), state._2)
+    // It is important to call isComplete first
+    // otherwise, isComplete could return true, while
+    // `value` is outdated.
+    val isComplete = otherCell.isComplete
+    val value = otherCell.getResult()
+
+    if (sequential) {
+      dependentCell.synchronized {
+        callback(Success(value), isComplete)
+      }
+    } else {
+      callback(Success(value), isComplete)
+    }
   }
 }
 
@@ -323,13 +337,16 @@ private[rasync] abstract class CombinedDepRunnable[K <: Key[V], V](
           dependentCompleter.putNext(v)
           dependentCompleter.removeDep(otherCell)
           dependentCompleter.removeNextDep(otherCell)
+          dependentCompleter.removeCombinedDep(otherCell)
         case NoOutcome =>
           dependentCompleter.removeDep(otherCell)
           dependentCompleter.removeNextDep(otherCell)
+          dependentCompleter.removeCombinedDep(otherCell)
       }
     case Failure(_) =>
       dependentCompleter.removeDep(otherCell)
       dependentCompleter.removeNextDep(otherCell)
+      dependentCompleter.removeCombinedDep(otherCell)
   }
   else {
     // Copied from NextDepRunnable

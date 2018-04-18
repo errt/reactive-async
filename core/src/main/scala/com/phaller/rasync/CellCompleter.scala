@@ -24,6 +24,8 @@ trait CellCompleter[K <: Key[V], V] {
 
   private[rasync] def removeDep(cell: Cell[K, V]): Unit
   private[rasync] def removeNextDep(cell: Cell[K, V]): Unit
+  private[rasync] def removeCombinedDep(cell: Cell[K, V]): Unit
+
 }
 
 object CellCompleter {
