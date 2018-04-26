@@ -19,7 +19,10 @@ class LazySuite extends FunSuite {
     val cell = pool.mkCell[StringIntKey, Int]("cell", _ => {
       FinalOutcome(1)
     })
-    cell.onComplete(_ => latch.countDown())
+    cell.on({
+      case (_, true) => latch.countDown()
+      case _ => /* */
+    })
 
     assert(!cell.isComplete)
     cell.trigger()
@@ -44,14 +47,20 @@ class LazySuite extends FunSuite {
     })
 
     cell2 = pool.mkCell[StringIntKey, Int]("cell2", _ => {
-      cell2.whenComplete(cell1, _ => {
+      cell2.when(cell1, (_, _) => {
         FinalOutcome(3)
       })
       NextOutcome(2)
     })
 
-    cell1.onComplete(_ => latch.countDown())
-    cell2.onComplete(_ => latch.countDown())
+    cell1.on({
+      case (_, true) => latch.countDown()
+      case _ => /* */
+    })
+    cell2.on({
+      case (_, true) => latch.countDown()
+      case _ => /* */
+    })
 
     assert(!cell1.isComplete)
     assert(!cell2.isComplete)
@@ -84,7 +93,10 @@ class LazySuite extends FunSuite {
       FinalOutcome(2)
     })
 
-    cell2.onComplete(_ => latch.countDown())
+    cell2.on({
+      case (_, true) => latch.countDown()
+      case _ => /* */
+    })
 
     cell2.trigger()
 
@@ -105,24 +117,30 @@ class LazySuite extends FunSuite {
     var cell2: Cell[StringIntKey, Int] = null
 
     cell1 = pool.mkCell[StringIntKey, Int]("cell1", _ => {
-      cell1.whenComplete(cell2, _ => {
-        FinalOutcome(3)
+
+      // create a dependency on cell2
+      cell1.when(cell2, (_, isFinal) => {
+        if (isFinal) FinalOutcome(3)
+        else NoOutcome
       })
+
+      // Initial value for cell1
       NextOutcome(1)
     })
 
     cell2 = pool.mkCell[StringIntKey, Int]("cell2", _ => {
-      cell2.whenComplete(cell1, _ => {
-        FinalOutcome(3)
+      // create a dependency on cell1
+      cell2.when(cell1, (_, isFinal) => {
+        if (isFinal) FinalOutcome(3)
+        else NoOutcome
       })
+
+      // Initial value for cell2
       NextOutcome(2)
     })
 
-    cell1.onNext(_ => latch1.countDown())
-    cell2.onNext(_ => latch1.countDown())
-
-    cell1.onComplete(_ => latch2.countDown())
-    cell2.onComplete(_ => latch2.countDown())
+    cell1.on((x, isFinal) => if (isFinal) latch2.countDown() else  latch1.countDown())
+    cell2.on((x, isFinal) => if (isFinal) latch2.countDown() else  latch1.countDown())
 
     cell2.trigger()
     latch1.await()
@@ -153,26 +171,33 @@ class LazySuite extends FunSuite {
     var cell3: Cell[theKey.type, Int] = null
 
     cell1 = pool.mkCell[theKey.type, Int](theKey, _ => {
-      cell1.whenComplete(cell2, _ => NextOutcome(-1))
+      cell1.when(cell2, (_, _) => NextOutcome(-1))
       NextOutcome(101)
     })
 
     cell2 = pool.mkCell[theKey.type, Int](theKey, _ => {
-      cell2.whenComplete(cell1, _ => NextOutcome(-1))
+      cell2.when(cell1, (_, _) => NextOutcome(-1))
       NextOutcome(102)
     })
 
     cell3 = pool.mkCell[theKey.type, Int](theKey, _ => {
-      cell3.whenComplete(cell1, _ => FinalOutcome(103))
+      cell3.when(cell1, (_, _) => FinalOutcome(103))
       NextOutcome(-1)
     })
 
-    cell1.onNext(_ => latch1.countDown())
-    cell2.onNext(_ => latch1.countDown())
+    cell1.on({
+      case (_, false) => latch1.countDown()
+      case (_, true) => latch2.countDown()
+    })
+    cell2.on({
+      case (_, false) => latch1.countDown()
+      case (_, true) => latch2.countDown()
+    })
 
-    cell1.onComplete(_ => latch2.countDown())
-    cell2.onComplete(_ => latch2.countDown())
-    cell3.onComplete(_ => latch2.countDown())
+    cell3.on({
+      case (_, true) => latch2.countDown()
+      case _ => /* */
+    })
 
     assert(!cell1.isComplete)
     assert(!cell2.isComplete)
@@ -204,24 +229,27 @@ class LazySuite extends FunSuite {
     var cell3: Cell[theKey.type, Int] = null
 
     cell1 = pool.mkCell[theKey.type, Int](theKey, _ => {
-      cell1.whenComplete(cell2, _ => {
+      cell1.when(cell2, (_, _) => {
         NextOutcome(-111)
       })
       NextOutcome(11)
     })
 
     cell2 = pool.mkCell[theKey.type, Int](theKey, _ => {
-      cell2.whenComplete(cell1, _ => {
+      cell2.when(cell1, (_, _) => {
         NextOutcome(-222)
       })
       NextOutcome(22)
     })
 
-    cell1.onNext(_ => latch1.countDown())
-    cell2.onNext(_ => latch1.countDown())
-
-    cell1.onComplete(_ => latch2.countDown())
-    cell2.onComplete(_ => latch2.countDown())
+    cell1.on({
+      case (_, false) => latch1.countDown()
+      case (_, true) => latch2.countDown()
+    })
+    cell2.on({
+      case (_, false) => latch1.countDown()
+      case (_, true) => latch2.countDown()
+    })
 
     cell2.trigger()
     latch1.await()
@@ -232,13 +260,16 @@ class LazySuite extends FunSuite {
     latch2.await()
 
     cell3 = pool.mkCell[theKey.type, Int](theKey, _ => {
-      cell3.whenComplete(cell1, _ => {
+      cell3.when(cell1, (_, _) => {
         FinalOutcome(333)
       })
       NextOutcome(-3)
     })
 
-    cell3.onComplete(_ => latch3.countDown())
+    cell3.on({
+      case (_, true) => latch3.countDown()
+      case _ => /* */
+    })
     cell3.trigger()
 
     latch3.await()
@@ -254,11 +285,11 @@ class LazySuite extends FunSuite {
     var c1: Cell[StringIntKey, Int] = null
     var c2: Cell[StringIntKey, Int] = null
     c1 = pool.mkCell[StringIntKey, Int]("cell1", _ => {
-      c1.whenNext(c2, _ => FinalOutcome(-2))
+      c1.when(c2, (_, _) => FinalOutcome(-2))
       FinalOutcome(-1)
     })
     c2 = pool.mkCell[StringIntKey, Int]("cell2", _ => {
-      c2.whenNext(c1, _ => FinalOutcome(-2))
+      c2.when(c1, (_, _) => FinalOutcome(-2))
       FinalOutcome(-1)
     })
 

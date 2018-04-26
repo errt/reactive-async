@@ -243,7 +243,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
           // Remove all callbacks that target other cells of this set.
           // The result of those cells is explicitely given in `results`.
           if (rac)
-            c.removeAllCallbacks(cells)
+            c.removeCallbacks(cells)
           // we can now safely put a final value
           c.resolveWithValue(v)
         }

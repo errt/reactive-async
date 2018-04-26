@@ -25,11 +25,11 @@ class BaseSuite extends FunSuite {
     implicit val pool = new HandlerPool
     val completer = CellCompleter[StringIntKey, Int]("somekey")
     val cell = completer.cell
-    cell.onComplete {
-      case Success(v) =>
+    cell.on {
+      case (Success(v), true) =>
         assert(v === 5)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -93,243 +93,6 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenComplete") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenCompleteSequential") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenCompleteSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenComplete: dependency 1") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-
-    latch.await()
-
-    assert(cell1.numCompleteDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenCompleteSequential: dependency 1") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenCompleteSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-
-    latch.await()
-
-    assert(cell1.numCompleteDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenComplete: dependency 2") {
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    completer2.putFinal(9)
-
-    cell1.waitUntilNoDeps()
-
-    assert(cell1.numCompleteDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenCompleteSequential: dependency 2") {
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenCompleteSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    completer2.putFinal(9)
-
-    cell1.waitUntilNoDeps()
-
-    assert(cell1.numCompleteDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenComplete: dependency 3") {
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenComplete(completer2.cell, x => if (x == 10) NextOutcome(20) else NoOutcome)
-
-    completer2.putFinal(10)
-
-    cell1.waitUntilNoDeps()
-
-    assert(cell1.numCompleteDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenCompleteSequential: dependency 3") {
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenCompleteSequential(completer2.cell, x => if (x == 10) NextOutcome(20) else NoOutcome)
-
-    completer2.putFinal(10)
-
-    cell1.waitUntilNoDeps()
-
-    assert(cell1.numCompleteDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext/whenComplete: dependency ") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-    val completer3 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenNext(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenCompleteSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenNextSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    cell1.whenNext(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenComplete(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenNextSequential(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenCompleteSequential(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    assert(cell1.numCompleteDependencies == 2)
-    assert(cell1.numNextDependencies == 2)
-
-    pool.shutdown()
-  }
-
-  test("whenComplete: callback removal") {
-    implicit val pool = new HandlerPool
-
-    val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-    val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-    completer1.cell.whenComplete(completer2.cell, (imm) => if (imm == Mutable) FinalOutcome(Mutable) else NoOutcome)
-
-    completer1.putFinal(Immutable)
-    assert(completer2.cell.numCompleteCallbacks == 0)
-    completer2.putFinal(Mutable)
-
-    assert(completer1.cell.getResult() == Immutable)
-    assert(completer2.cell.getResult() == Mutable)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenCompleteSequential: callback removal") {
-    implicit val pool = new HandlerPool
-
-    val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-    val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-    completer1.cell.whenCompleteSequential(completer2.cell, (imm) => if (imm == Mutable) FinalOutcome(Mutable) else NoOutcome)
-
-    completer1.putFinal(Immutable)
-    assert(completer2.cell.numCompleteCallbacks == 0)
-    completer2.putFinal(Mutable)
-
-    assert(completer1.cell.getResult() == Immutable)
-    assert(completer2.cell.getResult() == Mutable)
-
-    pool.onQuiescenceShutdown()
-  }
-
   test("when") {
     val latch = new CountDownLatch(1)
 
@@ -340,11 +103,11 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     cell1.when(completer2.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -366,11 +129,11 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     cell1.whenSequential(completer2.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -392,11 +155,11 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     cell1.when(completer2.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -405,7 +168,7 @@ class BaseSuite extends FunSuite {
 
     latch.await()
 
-    assert(cell1.numCompleteDependencies == 0)
+    assert(cell1.numDependencies == 0)
 
     pool.onQuiescenceShutdown()
   }
@@ -420,11 +183,11 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     cell1.whenSequential(completer2.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -433,7 +196,7 @@ class BaseSuite extends FunSuite {
 
     latch.await()
 
-    assert(cell1.numCompleteDependencies == 0)
+    assert(cell1.numDependencies == 0)
 
     pool.onQuiescenceShutdown()
   }
@@ -448,10 +211,9 @@ class BaseSuite extends FunSuite {
 
     completer2.putFinal(9)
 
-    cell1.waitUntilNoCombinedDeps()
+    cell1.waitUntilNoDeps()
 
-    assert(cell1.numCompleteDependencies == 0)
-    assert(cell1.numNextDependencies == 0)
+    assert(cell1.numDependencies == 0)
 
     pool.onQuiescenceShutdown()
   }
@@ -466,9 +228,9 @@ class BaseSuite extends FunSuite {
 
     completer2.putFinal(9)
 
-    cell1.waitUntilNoCombinedDeps()
+    cell1.waitUntilNoDeps()
 
-    assert(cell1.numCompleteDependencies == 0)
+    assert(cell1.numDependencies == 0)
 
     pool.onQuiescenceShutdown()
   }
@@ -483,9 +245,9 @@ class BaseSuite extends FunSuite {
 
     completer2.putFinal(10)
 
-    cell1.waitUntilNoCombinedDeps()
+    cell1.waitUntilNoDeps()
 
-    assert(cell1.numCompleteDependencies == 0)
+    assert(cell1.numDependencies == 0)
 
     pool.onQuiescenceShutdown()
   }
@@ -500,14 +262,14 @@ class BaseSuite extends FunSuite {
 
     completer2.putFinal(10)
 
-    cell1.waitUntilNoCombinedDeps()
+    cell1.waitUntilNoDeps()
 
-    assert(cell1.numCompleteDependencies == 0)
+    assert(cell1.numDependencies == 0)
 
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNext/whenComplete/when: dependency ") {
+  test("when/whenComplete/when: dependency ") {
     val latch = new CountDownLatch(1)
 
     implicit val pool = new HandlerPool
@@ -516,22 +278,21 @@ class BaseSuite extends FunSuite {
     val completer3 = CellCompleter[StringIntKey, Int]("someotherkey")
 
     val cell1 = completer1.cell
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenNext(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.when(completer2.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.when(completer2.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
     cell1.when(completer2.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenCompleteSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenNextSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.whenSequential(completer2.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.whenSequential(completer2.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
     cell1.whenSequential(completer2.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
 
-    cell1.whenNext(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenComplete(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.when(completer3.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.when(completer3.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
     cell1.when(completer3.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenNextSequential(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-    cell1.whenCompleteSequential(completer3.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.whenSequential(completer3.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.whenSequential(completer3.cell, (x, isFinal) => if (x == 10) FinalOutcome(20) else NoOutcome)
     cell1.whenSequential(completer3.cell, (x, _) => if (x == 10) FinalOutcome(20) else NoOutcome)
 
-    assert(cell1.numCompleteDependencies == 2)
-    assert(cell1.numNextDependencies == 2)
+    assert(cell1.numDependencies == 2)
 
     pool.shutdown()
   }
@@ -545,7 +306,7 @@ class BaseSuite extends FunSuite {
     completer1.cell.when(completer2.cell, (imm, isFinal) => if (imm == Mutable) FinalOutcome(Mutable) else NoOutcome)
 
     completer1.putFinal(Immutable)
-    assert(completer2.cell.numCompleteCallbacks == 0)
+    assert(completer2.cell.numCallbacks == 0)
     completer2.putFinal(Mutable)
 
     assert(completer1.cell.getResult() == Immutable)
@@ -563,7 +324,7 @@ class BaseSuite extends FunSuite {
     completer1.cell.whenSequential(completer2.cell, (imm, isFinal) => if (imm == Mutable) FinalOutcome(Mutable) else NoOutcome)
 
     completer1.putFinal(Immutable)
-    assert(completer2.cell.numCompleteCallbacks == 0)
+    assert(completer2.cell.numCallbacks == 0)
     completer2.putFinal(Mutable)
 
     assert(completer1.cell.getResult() == Immutable)
@@ -580,11 +341,11 @@ class BaseSuite extends FunSuite {
 
     val cell = completer.cell
 
-    cell.onNext {
-      case Success(x) =>
+    cell.on {
+      case (Success(x), _) =>
         assert(x === 9)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -592,398 +353,6 @@ class BaseSuite extends FunSuite {
     completer.putNext(9)
 
     latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, x => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putNext(10)
-    latch.await()
-
-    assert(cell1.numNextDependencies == 1)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, x => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putNext(10)
-    latch.await()
-
-    assert(cell1.numNextDependencies == 1)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: dependency 1") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 8)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putNext(9)
-    completer1.putNext(8)
-
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: dependency 1") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 8)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putNext(9)
-    completer1.putNext(8)
-
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: dependency 2") {
-    val latch = new CountDownLatch(2)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    assert(cell1.numNextDependencies == 1)
-
-    cell1.onComplete {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-    latch.await()
-
-    assert(cell1.numNextDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: dependency 2") {
-    val latch = new CountDownLatch(2)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
-
-    assert(cell1.numNextDependencies == 1)
-
-    cell1.onComplete {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-    latch.await()
-
-    assert(cell1.numNextDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: Triggered by putFinal when no whenComplete exist for same cell") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    assert(cell1.numNextDependencies == 1)
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: Triggered by putFinal when no whenComplete exist for same cell") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    assert(cell1.numNextDependencies == 1)
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: Remove whenNext dependencies from cells that depend on a completing cell") {
-    /* Needs the dependees from the feature/cscc-resolving branch */
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, x => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    completer2.putFinal(10)
-
-    cell1.waitUntilNoNextDeps()
-
-    assert(cell1.numNextDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: Remove whenNext dependencies from cells that depend on a completing cell") {
-    /* Needs the dependees from the feature/cscc-resolving branch */
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, x => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-
-    completer2.putFinal(10)
-
-    cell1.waitUntilNoNextDeps()
-
-    assert(cell1.numNextDependencies == 0)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: callback removal") {
-    implicit val pool = new HandlerPool
-
-    val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-    val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-    completer1.cell.whenNext(completer2.cell, (imm: Immutability) => imm match {
-      case Mutable => NextOutcome(Mutable)
-      case _ => NoOutcome
-    })
-
-    completer1.putFinal(Immutable)
-    assert(completer2.cell.numNextCallbacks == 0)
-    completer2.putNext(Mutable)
-
-    assert(completer1.cell.getResult() == Immutable)
-    assert(completer2.cell.getResult() == Mutable)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: callback removal") {
-    implicit val pool = new HandlerPool
-
-    val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-    val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-    completer1.cell.whenNextSequential(completer2.cell, (imm: Immutability) => imm match {
-      case Mutable => NextOutcome(Mutable)
-      case _ => NoOutcome
-    })
-
-    completer1.putFinal(Immutable)
-    assert(completer2.cell.numNextDependencies == 0)
-    completer2.putNext(Mutable)
-
-    assert(completer1.cell.getResult() == Immutable)
-    assert(completer2.cell.getResult() == Mutable)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: Dependencies concurrency test") {
-    implicit val pool = new HandlerPool
-    val latch = new CountDownLatch(10000)
-    val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-    for (i <- 1 to 10000) {
-      pool.execute(() => {
-        val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-        completer1.cell.whenNext(completer2.cell, (x: Immutability) => {
-          if (x == Mutable) NextOutcome(Mutable)
-          else NoOutcome
-        })
-        latch.countDown()
-      })
-    }
-
-    latch.await()
-
-    assert(completer1.cell.numNextDependencies == 10000)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenComplete: Dependencies concurrency test") {
-    implicit val pool = new HandlerPool
-    val latch = new CountDownLatch(10000)
-    val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-    for (i <- 1 to 10000) {
-      pool.execute(() => {
-        val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-        completer1.cell.whenComplete(completer2.cell, (x: Immutability) => {
-          if (x == Mutable) NextOutcome(Mutable)
-          else NoOutcome
-        })
-        latch.countDown()
-      })
-    }
-
-    latch.await()
-
-    assert(completer1.cell.numCompleteDependencies == 10000)
 
     pool.onQuiescenceShutdown()
   }
@@ -996,7 +365,7 @@ class BaseSuite extends FunSuite {
     for (i <- 1 to 10000) {
       pool.execute(() => {
         val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-        completer1.cell.when(completer2.cell, (x: Immutability, _) => {
+        completer1.cell.when(completer2.cell, (x, _) => {
           if (x == Mutable) NextOutcome(Mutable)
           else NoOutcome
         })
@@ -1006,7 +375,7 @@ class BaseSuite extends FunSuite {
 
     latch.await()
 
-    assert(completer1.cell.numCompleteDependencies == 10000)
+    assert(completer1.cell.numDependencies == 10000)
 
     pool.onQuiescenceShutdown()
   }
@@ -1029,472 +398,7 @@ class BaseSuite extends FunSuite {
 
     latch.await()
 
-    assert(completer1.cell.numCompleteDependencies == 10000)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: Dependencies concurrency test") {
-    implicit val pool = new HandlerPool
-    val latch = new CountDownLatch(10000)
-    val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-    val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-    for (i <- 1 to 10000) {
-      pool.execute(() => {
-        val otherCell = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey).cell
-        completer1.cell.whenNextSequential(otherCell, (x: Immutability) => {
-          if (x == Mutable) NextOutcome(Mutable)
-          else NoOutcome
-        })
-        latch.countDown()
-      })
-    }
-
-    latch.await()
-
-    assert(completer1.cell.numNextDependencies == 10000)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: concurrent put final") {
-    var expectedValue: Option[Immutability] = None
-
-    for (_ <- 1 to 100) {
-      implicit val pool = new HandlerPool
-      val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-      val cell1 = completer1.cell
-      cell1.trigger()
-
-      pool.execute(() => cell1.whenComplete(completer2.cell, x => {
-        NoOutcome
-      }))
-
-      pool.execute(() => cell1.whenNext(completer2.cell, x => {
-        if (x == Mutable) NextOutcome(Mutable)
-        else NoOutcome
-      }))
-      pool.execute(() => completer2.putFinal(Mutable))
-
-      val fut = pool.quiescentResolveCell
-      Await.ready(fut, 2.seconds)
-
-      if (expectedValue.isEmpty) expectedValue = Some(cell1.getResult())
-      else assert(cell1.getResult() == expectedValue.get)
-
-      pool.onQuiescenceShutdown()
-    }
-  }
-
-  test("whenNextSequential: concurrent put final") {
-    var expectedValue: Option[Immutability] = None
-
-    for (_ <- 1 to 100) {
-      implicit val pool = new HandlerPool
-      val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-      val cell1 = completer1.cell
-
-      pool.execute(() => cell1.whenCompleteSequential(completer2.cell, x => {
-        NoOutcome
-      }))
-
-      pool.execute(() => cell1.whenNextSequential(completer2.cell, x => {
-        if (x == Mutable) NextOutcome(Mutable)
-        else NoOutcome
-      }))
-      pool.execute(() => completer2.putFinal(Mutable))
-
-      val fut = pool.quiescentResolveCycles
-      Await.ready(fut, 2.seconds)
-
-      if (expectedValue.isEmpty) expectedValue = Some(cell1.getResult())
-      else assert(cell1.getResult() == expectedValue.get)
-
-      pool.onQuiescenceShutdown()
-    }
-  }
-
-  test("whenNext: One cell with several dependencies on the same cell concurrency test") {
-    implicit val pool = new HandlerPool
-
-    for (i <- 1 to 1000) {
-      val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      completer1.cell.whenNext(completer2.cell, {
-        case Immutable | ConditionallyImmutable => NoOutcome
-        case Mutable => NextOutcome(Mutable)
-      })
-
-      assert(completer1.cell.numTotalDependencies == 1)
-
-      pool.execute(() => completer2.putNext(ConditionallyImmutable))
-      pool.execute(() => completer2.putFinal(Mutable))
-
-      val fut = pool.quiescentResolveCell
-      Await.result(fut, 2.second)
-
-      assert(completer2.cell.getResult() == Mutable)
-      assert(completer1.cell.getResult() == Mutable)
-    }
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: concurrent put next") {
-    var expectedValue: Option[Immutability] = None
-
-    for (_ <- 1 to 100) {
-      implicit val pool = new HandlerPool
-      val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-
-      val cell1 = completer1.cell
-
-      pool.execute(() => cell1.whenNext(completer2.cell, x => {
-        if (x == Mutable) NextOutcome(Mutable)
-        else NoOutcome
-      }))
-      pool.execute(() => completer2.putNext(Mutable))
-
-      val fut = pool.quiescentResolveDefaults
-      Await.ready(fut, 2.seconds)
-
-      if (expectedValue.isEmpty) expectedValue = Some(cell1.getResult())
-      else assert(cell1.getResult() == expectedValue.get)
-
-      pool.shutdown()
-    }
-  }
-
-  test("whenNextSequential: One cell with several dependencies on the same cell concurrency test") {
-    implicit val pool = new HandlerPool
-
-    var numErrorsWithCell1 = 0
-    var numErrorsWithCell2 = 0
-
-    for (i <- 1 to 1000) {
-      val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      completer1.cell.whenNextSequential(completer2.cell, {
-        case Immutable | ConditionallyImmutable => NoOutcome
-        case Mutable => NextOutcome(Mutable)
-      })
-
-      assert(completer1.cell.numTotalDependencies == 1)
-
-      pool.execute(() => completer2.putNext(ConditionallyImmutable))
-      pool.execute(() => completer2.putFinal(Mutable))
-
-      val fut = pool.quiescentResolveCell
-      Await.result(fut, 2.second)
-
-      if (!(completer1.cell.getResult() == Mutable)) numErrorsWithCell1 += 1
-      if (!(completer2.cell.getResult() == Mutable)) numErrorsWithCell2 += 1
-    }
-    assert(numErrorsWithCell1 == 0, "errors with cell 1")
-    assert(numErrorsWithCell2 == 0, "errors with cell 2")
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: complete dependent cell - forced update") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[NaturalNumberKey.type, Int](NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
-    val completer2 = CellCompleter[NaturalNumberKey.type, Int](NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    // This will complete `cell1`
-    completer2.putNext(10)
-
-    latch.await()
-
-    // cell1 should be completed, so putNext(5) should not succeed
-    try {
-      completer1.putNext(50)
-      assert(false)
-    } catch {
-      case ise: IllegalStateException => assert(true)
-      case e: Exception => assert(false)
-    }
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: complete dependent cell - forced update") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[NaturalNumberKey.type, Int](NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
-    val completer2 = CellCompleter[NaturalNumberKey.type, Int](NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    // This will complete `cell1`
-    completer2.putNext(10)
-
-    latch.await()
-
-    // cell1 should be completed, so putNext(5) should not succeed
-    try {
-      completer1.putNext(50)
-      assert(false)
-    } catch {
-      case ise: IllegalStateException => assert(true)
-      case e: Exception => assert(false)
-    }
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: complete dependent cell - ignored update") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    // This will complete `cell1`
-    completer2.putNext(10)
-
-    latch.await()
-
-    // the invocation of putNext is ignored, because cell1 is already completed
-    // note that the implicitly used StringIntUpdater has ignoreIfFinal==true
-    try {
-      completer1.putNext(50)
-    } catch {
-      case ise: IllegalStateException => assert(false)
-      case e: Exception => assert(false)
-    }
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: complete dependent cell - ignored update") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onComplete {
-      case Success(v) =>
-        assert(v === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    // This will complete `cell1`
-    completer2.putNext(10)
-
-    latch.await()
-
-    // the invocation of putNext is ignored, because cell1 is already completed
-    // note that the implicitly used StringIntUpdater has ignoreIfFinal==true
-    try {
-      completer1.putNext(50)
-    } catch {
-      case ise: IllegalStateException => assert(false)
-      case e: Exception => assert(false)
-    }
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: complete depedent cell, dependency 1") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onComplete {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putNext(9)
-    completer2.putNext(10)
-
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: complete depedent cell, dependency 1") {
-    val latch = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onComplete {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putNext(9)
-    completer2.putNext(10)
-
-    latch.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNext: complete dependent cell, dependency 2") {
-    val latch1 = new CountDownLatch(1)
-    val latch2 = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 8 || x === 20)
-        latch1.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch1.countDown()
-    }
-
-    cell1.onComplete {
-      case Success(x) =>
-        assert(x === 20)
-        latch2.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch2.countDown()
-    }
-
-    completer1.putNext(8)
-    latch1.await()
-
-    completer2.putNext(10)
-    latch2.await()
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: complete dependent cell, dependency 2") {
-    val latch1 = new CountDownLatch(1)
-    val latch2 = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      if (x == 10) FinalOutcome(20)
-      else NoOutcome
-    })
-
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 8 || x === 20)
-        latch1.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch1.countDown()
-    }
-
-    cell1.onComplete {
-      case Success(x) =>
-        assert(x === 20)
-        latch2.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch2.countDown()
-    }
-
-    completer1.putNext(8)
-    latch1.await()
-
-    completer2.putNext(10)
-    latch2.await()
+    assert(completer1.cell.numDependencies == 10000)
 
     pool.onQuiescenceShutdown()
   }
@@ -1563,7 +467,7 @@ class BaseSuite extends FunSuite {
         case Mutable => NextOutcome(Mutable)
       })
 
-      assert(completer1.cell.numTotalDependencies == 1)
+      assert(completer1.cell.numDependencies == 1)
 
       pool.execute(() => completer2.putNext(ConditionallyImmutable))
       pool.execute(() => completer2.putFinal(Mutable))
@@ -1618,7 +522,7 @@ class BaseSuite extends FunSuite {
         case Mutable => NextOutcome(Mutable)
       })
 
-      assert(completer1.cell.numTotalDependencies == 1)
+      assert(completer1.cell.numDependencies == 1)
 
       pool.execute(() => completer2.putNext(ConditionallyImmutable))
       pool.execute(() => completer2.putFinal(Mutable))
@@ -1647,11 +551,11 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -1686,11 +590,11 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -1725,11 +629,11 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -1764,11 +668,11 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onComplete {
-      case Success(v) =>
+    cell1.on {
+      case (Success(v), _) =>
         assert(v === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -1803,11 +707,11 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onComplete {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -1833,11 +737,11 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onComplete {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 20)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -1864,20 +768,20 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onNext {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 8 || x === 20)
         latch1.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch1.countDown()
     }
 
-    cell1.onComplete {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 20)
         latch2.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch2.countDown()
     }
@@ -1905,20 +809,20 @@ class BaseSuite extends FunSuite {
       else NoOutcome
     })
 
-    cell1.onNext {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 8 || x === 20)
         latch1.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch1.countDown()
     }
 
-    cell1.onComplete {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 20)
         latch2.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch2.countDown()
     }
@@ -1945,25 +849,25 @@ class BaseSuite extends FunSuite {
       Outcome(x, isFinal) // complete, if completer2 is completed
     })
 
-    assert(cell1.numNextDependencies == 1)
-    assert(cell1.numTotalDependencies == 1)
-    assert(completer2.cell.numNextCallbacks == 1)
-    assert(completer2.cell.numCompleteCallbacks == 1)
+    assert(cell1.numDependencies == 1)
+    assert(cell1.numDependencies == 1)
+    assert(completer2.cell.numCallbacks == 1)
+    assert(completer2.cell.numCallbacks == 1)
 
-    cell1.onNext {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert((x === 8 && !cell1.isComplete) || x === 10)
         latch1.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch1.countDown()
     }
 
-    cell1.onComplete {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 10)
         latch2.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch2.countDown()
     }
@@ -1994,25 +898,25 @@ class BaseSuite extends FunSuite {
       Outcome(x, isFinal) // complete, if completer2 is completed
     })
 
-    assert(cell1.numNextDependencies == 1)
-    assert(cell1.numTotalDependencies == 1)
-    assert(completer2.cell.numNextCallbacks == 1)
-    assert(completer2.cell.numCompleteCallbacks == 1)
+    assert(cell1.numDependencies == 1)
+    assert(cell1.numDependencies == 1)
+    assert(completer2.cell.numCallbacks == 1)
+    assert(completer2.cell.numCallbacks == 1)
 
-    cell1.onNext {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert((x === 8 && !cell1.isComplete) || x === 10)
         latch1.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch1.countDown()
     }
 
-    cell1.onComplete {
-      case Success(x) =>
+    cell1.on {
+      case (Success(x), _) =>
         assert(x === 10)
         latch2.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch2.countDown()
     }
@@ -2035,11 +939,11 @@ class BaseSuite extends FunSuite {
 
     implicit val pool = new HandlerPool
     val completer = CellCompleter[StringIntKey, Int]("somekey")
-    completer.cell.onComplete {
-      case Success(v) =>
+    completer.cell.on {
+      case (Success(v), _) =>
         assert(v === 6)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -2054,11 +958,11 @@ class BaseSuite extends FunSuite {
 
     implicit val pool = new HandlerPool
     val completer = CellCompleter[StringIntKey, Int]("somekey")
-    completer.cell.onNext {
-      case Success(x) =>
+    completer.cell.on {
+      case (Success(x), _) =>
         assert(x === 10)
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -2080,11 +984,11 @@ class BaseSuite extends FunSuite {
     implicit val pool = new HandlerPool
     val completer = CellCompleter[key.type, Set[Int]](key)
     val cell = completer.cell
-    cell.onComplete {
-      case Success(v) =>
+    cell.on {
+      case (Success(v), _) =>
         assert(v === Set(3, 4, 5))
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -2108,11 +1012,11 @@ class BaseSuite extends FunSuite {
     val completer = CellCompleter[key.type, Set[Int]](key)
     val cell = completer.cell
     completer.putNext(Set(3, 5))
-    cell.onNext {
-      case Success(v) =>
+    cell.on {
+      case (Success(v), _) =>
         assert(v === Set(3, 4, 5) || v === Set(3, 5))
         latch.countDown()
-      case Failure(e) =>
+      case _ =>
         assert(false)
         latch.countDown()
     }
@@ -2142,8 +1046,8 @@ class BaseSuite extends FunSuite {
     val completer2 = CellCompleter[StringIntKey, Int]("key2")
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.whenComplete(cell2, x => if (x == 1) FinalOutcome(1) else NoOutcome)
-    cell2.whenComplete(cell1, x => if (x == 1) FinalOutcome(1) else NoOutcome)
+    cell1.when(cell2, (x, isFinal) => if (x == 1) FinalOutcome(1) else NoOutcome)
+    cell2.when(cell1, (x, isFinal) => if (x == 1) FinalOutcome(1) else NoOutcome)
     val incompleteFut = pool.quiescentIncompleteCells
     val cells = Await.result(incompleteFut, 2.seconds)
     assert(cells.map(_.key).toList.toString == "List(key1, key2)")
@@ -2155,8 +1059,8 @@ class BaseSuite extends FunSuite {
     val completer2 = CellCompleter[StringIntKey, Int]("key2")
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.whenComplete(cell2, x => if (x == 0) FinalOutcome(0) else NoOutcome)
-    cell2.whenComplete(cell1, x => if (x == 0) FinalOutcome(0) else NoOutcome)
+    cell1.when(cell2, (x, isFinal) => if (x == 0) FinalOutcome(0) else NoOutcome)
+    cell2.when(cell1, (x, isFinal) => if (x == 0) FinalOutcome(0) else NoOutcome)
     val qfut = pool.quiescentResolveCell
     Await.ready(qfut, 2.seconds)
     val incompleteFut = pool.quiescentIncompleteCells
@@ -2301,33 +1205,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNext and whenComplete: same depender") {
-    val latch1 = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("c1")
-    val completer2 = CellCompleter[StringIntKey, Int]("c2")
-
-    completer2.cell.whenNext(completer1.cell, (v) => {
-      FinalOutcome(10)
-    })
-    completer2.cell.whenComplete(completer1.cell, (v) => {
-      FinalOutcome(10)
-    })
-
-    completer2.cell.onComplete(v => latch1.countDown())
-
-    completer1.putFinal(10)
-
-    latch1.await()
-
-    pool.onQuiescenceShutdown()
-
-    assert(completer1.cell.getResult() == 10)
-    assert(completer2.cell.getResult() == 10)
-  }
-
-  test("whenNext and whenComplete: different depender") {
+  test("when: different depender") {
     val latch1 = new CountDownLatch(2)
 
     implicit val pool = new HandlerPool
@@ -2335,16 +1213,16 @@ class BaseSuite extends FunSuite {
     val completer2 = CellCompleter[StringIntKey, Int]("c2")
     val completer3 = CellCompleter[StringIntKey, Int]("c3")
 
-    completer2.cell.whenNext(completer1.cell, (v) => {
+    completer2.cell.when(completer1.cell, (v, _) => {
       FinalOutcome(10)
     })
-    completer3.cell.whenComplete(completer1.cell, (v) => {
+    completer3.cell.when(completer1.cell, (v, _) => {
       FinalOutcome(10)
     })
 
-    completer2.cell.onComplete(v => latch1.countDown())
-    completer3.cell.onComplete(v => latch1.countDown())
-
+    completer2.cell.on((v, _) => latch1.countDown())
+    completer3.cell.on((v, _) => latch1.countDown())
+    
     completer1.putFinal(10)
 
     latch1.await()
@@ -2428,7 +1306,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNext: cSCC with constant resolution") {
+  test("when: cSCC with constant resolution") {
     val latch = new CountDownLatch(4)
 
     implicit val pool = new HandlerPool
@@ -2449,19 +1327,19 @@ class BaseSuite extends FunSuite {
     completer4.putNext(-1)
 
     // create a cSCC, assert that none of the callbacks get called again.
-    cell1.whenNext(cell2, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell1.whenNext(cell3, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell2.whenNext(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell3.whenNext(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell4.whenNext(cell1, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.when(cell2, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.when(cell3, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell2.when(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell3.when(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell4.when(cell1, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
 
     for (c <- List(cell1, cell2, cell3, cell4))
-      c.onComplete {
-        case Success(v) =>
+      c.on {
+        case (Success(v), _) =>
           assert(v === 0)
-          assert(c.numNextDependencies === 0)
+          assert(c.numDependencies === 0)
           latch.countDown()
-        case Failure(e) =>
+        case _ =>
           assert(false)
           latch.countDown()
       }
@@ -2476,7 +1354,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNextSequential: cSCC with constant resolution") {
+  test("whenSequential: cSCC with constant resolution") {
     val latch = new CountDownLatch(4)
 
     implicit val pool = new HandlerPool
@@ -2497,19 +1375,19 @@ class BaseSuite extends FunSuite {
     completer4.putNext(-1)
 
     // create a cSCC, assert that none of the callbacks get called.
-    cell1.whenNextSequential(cell2, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell1.whenNextSequential(cell3, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell2.whenNextSequential(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell3.whenNextSequential(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell4.whenNextSequential(cell1, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.whenSequential(cell2, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.whenSequential(cell3, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell2.whenSequential(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell3.whenSequential(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell4.whenSequential(cell1, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
 
     for (c <- List(cell1, cell2, cell3, cell4))
-      c.onComplete {
-        case Success(v) =>
+      c.on {
+        case (Success(v), _) =>
           assert(v === 0)
-          assert(c.numNextDependencies === 0)
+          assert(c.numDependencies === 0)
           latch.countDown()
-        case Failure(e) =>
+        case _ =>
           assert(false)
           latch.countDown()
       }
@@ -2524,7 +1402,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNext: cSCC with default resolution") {
+  test("when: cSCC with default resolution") {
     val latch = new CountDownLatch(4)
 
     implicit val pool = new HandlerPool
@@ -2545,19 +1423,19 @@ class BaseSuite extends FunSuite {
     completer4.putNext(-1)
 
     // create a cSCC, assert that none of the callbacks get called again.
-    cell1.whenNext(cell2, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell1.whenNext(cell3, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell2.whenNext(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell3.whenNext(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell4.whenNext(cell1, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.when(cell2, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.when(cell3, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell2.when(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell3.when(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell4.when(cell1, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
 
     for (c <- List(cell1, cell2, cell3, cell4))
-      c.onComplete {
-        case Success(v) =>
+      c.on {
+        case (Success(v), _) =>
           assert(v === 1)
-          assert(c.numNextDependencies === 0)
+          assert(c.numDependencies === 0)
           latch.countDown()
-        case Failure(e) =>
+        case _ =>
           assert(false)
           latch.countDown()
       }
@@ -2571,7 +1449,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNextSequential: cSCC with default resolution") {
+  test("whenSequential: cSCC with default resolution") {
     val latch = new CountDownLatch(4)
 
     implicit val pool = new HandlerPool
@@ -2592,19 +1470,19 @@ class BaseSuite extends FunSuite {
     completer4.putNext(-1)
 
     // create a cSCC, assert that none of the callbacks get called.
-    cell1.whenNextSequential(cell2, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell1.whenNextSequential(cell3, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell2.whenNextSequential(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell3.whenNextSequential(cell4, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
-    cell4.whenNextSequential(cell1, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.whenSequential(cell2, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell1.whenSequential(cell3, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell2.whenSequential(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell3.whenSequential(cell4, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell4.whenSequential(cell1, (v, _) => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
 
     for (c <- List(cell1, cell2, cell3, cell4))
-      c.onComplete {
-        case Success(v) =>
+      c.on {
+        case (Success(v), _) =>
           assert(v === 1)
-          assert(c.numNextDependencies === 0)
+          assert(c.numDependencies === 0)
           latch.countDown()
-        case Failure(e) =>
+        case _ =>
           assert(false)
           latch.countDown()
       }
@@ -2618,7 +1496,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNext: cycle with default resolution") {
+  test("when: cycle with default resolution") {
     sealed trait Value
     case object Bottom extends Value
     case object ShouldNotHappen extends Value
@@ -2636,8 +1514,8 @@ class BaseSuite extends FunSuite {
       val cell1 = completer1.cell
       val cell2 = completer2.cell
 
-      cell1.whenNext(cell2, v => NextOutcome(ShouldNotHappen))
-      cell2.whenNext(cell1, v => NextOutcome(ShouldNotHappen))
+      cell1.when(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+      cell2.when(cell1, (v, _) => NextOutcome(ShouldNotHappen))
 
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
@@ -2649,7 +1527,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNextSequential: cycle with default resolution") {
+  test("whenSequential: cycle with default resolution") {
     sealed trait Value
     case object Bottom extends Value
     case object ShouldNotHappen extends Value
@@ -2667,8 +1545,8 @@ class BaseSuite extends FunSuite {
       val cell1 = completer1.cell
       val cell2 = completer2.cell
 
-      cell1.whenNextSequential(cell2, v => NextOutcome(ShouldNotHappen))
-      cell2.whenNextSequential(cell1, v => NextOutcome(ShouldNotHappen))
+      cell1.whenSequential(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+      cell2.whenSequential(cell1, (v, _) => NextOutcome(ShouldNotHappen))
 
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
@@ -2680,7 +1558,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNext: cycle with constant resolution") {
+  test("when: cycle with constant resolution") {
     sealed trait Value
     case object Bottom extends Value
     case object OK extends Value
@@ -2705,8 +1583,8 @@ class BaseSuite extends FunSuite {
       val cell1 = completer1.cell
       val cell2 = completer2.cell
 
-      cell1.whenNext(cell2, v => NextOutcome(ShouldNotHappen))
-      cell2.whenNext(cell1, v => NextOutcome(ShouldNotHappen))
+      cell1.when(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+      cell2.when(cell1, (v, _) => NextOutcome(ShouldNotHappen))
 
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
@@ -2718,7 +1596,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNextSequential: cycle with constant resolution") {
+  test("whenSequential: cycle with constant resolution") {
     sealed trait Value
     case object Bottom extends Value
     case object OK extends Value
@@ -2743,8 +1621,8 @@ class BaseSuite extends FunSuite {
       val cell1 = completer1.cell
       val cell2 = completer2.cell
 
-      cell1.whenNextSequential(cell2, v => NextOutcome(ShouldNotHappen))
-      cell2.whenNextSequential(cell1, v => NextOutcome(ShouldNotHappen))
+      cell1.whenSequential(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+      cell2.whenSequential(cell1, (v, _) => NextOutcome(ShouldNotHappen))
 
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
@@ -2756,7 +1634,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNext: cycle with additional incoming dep") {
+  test("when: cycle with additional incoming dep") {
     sealed trait Value
     case object Bottom extends Value
     case object Resolved extends Value
@@ -2786,11 +1664,11 @@ class BaseSuite extends FunSuite {
     val in = CellCompleter[TheKey.type, Value](TheKey)
 
     // let `cell1` and `cell2` form a cycle
-    cell1.whenNext(cell2, v => NextOutcome(ShouldNotHappen))
-    cell2.whenNext(cell1, v => NextOutcome(ShouldNotHappen))
+    cell1.when(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+    cell2.when(cell1, (v, _) => NextOutcome(ShouldNotHappen))
 
     // the cycle is dependent on incoming information from `in`
-    cell2.whenNext(in.cell, v => { NextOutcome(ShouldNotHappen) })
+    cell2.when(in.cell, (v, _) => { NextOutcome(ShouldNotHappen) })
 
     // resolve the independent cell `in` and the cycle
     val fut = pool.quiescentResolveCell
@@ -2803,7 +1681,7 @@ class BaseSuite extends FunSuite {
     assert(in.cell.getResult() == Fallback)
   }
 
-  test("whenNextSequential: cycle with additional incoming dep") {
+  test("whenSequential: cycle with additional incoming dep") {
     sealed trait Value
     case object Bottom extends Value
     case object Resolved extends Value
@@ -2833,11 +1711,11 @@ class BaseSuite extends FunSuite {
     val in = CellCompleter[TheKey.type, Value](TheKey)
 
     // let `cell1` and `cell2` form a cycle
-    cell1.whenNextSequential(cell2, v => NextOutcome(ShouldNotHappen))
-    cell2.whenNextSequential(cell1, v => NextOutcome(ShouldNotHappen))
+    cell1.whenSequential(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+    cell2.whenSequential(cell1, (v, _) => NextOutcome(ShouldNotHappen))
 
     // the cycle is dependent on incoming information from `in`
-    cell2.whenNextSequential(in.cell, v => { NextOutcome(ShouldNotHappen) })
+    cell2.whenSequential(in.cell, (v, _) => { NextOutcome(ShouldNotHappen) })
 
     // resolve the independent cell `in` and the cycle
     val fut = pool.quiescentResolveCell
@@ -2880,11 +1758,11 @@ class BaseSuite extends FunSuite {
     val in = CellCompleter[TheKey.type, Value](TheKey)
 
     // let `cell1` and `cell2` form a cycle
-    cell1.whenComplete(cell2, v => NextOutcome(ShouldNotHappen))
-    cell2.whenComplete(cell1, v => NextOutcome(ShouldNotHappen))
+    cell1.when(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+    cell2.when(cell1, (v, _) => NextOutcome(ShouldNotHappen))
 
     // the cycle is dependent on incoming information from `in`
-    cell2.whenComplete(in.cell, v => { NextOutcome(ShouldNotHappen) })
+    cell2.when(in.cell, (v, _) => { NextOutcome(ShouldNotHappen) })
 
     // resolve the independent cell `in` and the cycle
     val fut = pool.quiescentResolveCell
@@ -2897,7 +1775,7 @@ class BaseSuite extends FunSuite {
     assert(in.cell.getResult() == Fallback)
   }
 
-  test("whenNext: cycle with additional outgoing dep") {
+  test("when: cycle with additional outgoing dep") {
     sealed trait Value
     case object Bottom extends Value
     case object Dummy extends Value
@@ -2926,10 +1804,10 @@ class BaseSuite extends FunSuite {
     val cell2 = completer2.cell
     val out = CellCompleter[TheKey.type, Value](TheKey)
     out.putNext(Dummy)
-    cell1.whenNext(cell2, v => NextOutcome(ShouldNotHappen))
-    cell2.whenNext(cell1, v => NextOutcome(ShouldNotHappen))
+    cell1.when(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+    cell2.when(cell1, (v, _) => NextOutcome(ShouldNotHappen))
     out.putNext(ShouldNotHappen)
-    out.cell.whenComplete(cell1, v => FinalOutcome(OK))
+    out.cell.when(cell1, (v, _) => FinalOutcome(OK))
 
     val fut = pool.quiescentResolveCycles
     Await.ready(fut, 1.minutes)
@@ -2941,7 +1819,7 @@ class BaseSuite extends FunSuite {
     assert(out.cell.getResult() == OK)
   }
 
-  test("whenNextSequential: cycle with additional outgoing dep") {
+  test("whenSequential: cycle with additional outgoing dep") {
     sealed trait Value
     case object Bottom extends Value
     case object Dummy extends Value
@@ -2970,10 +1848,10 @@ class BaseSuite extends FunSuite {
     val cell2 = completer2.cell
     val out = CellCompleter[TheKey.type, Value](TheKey)
     out.putNext(Dummy)
-    cell1.whenNextSequential(cell2, v => NextOutcome(ShouldNotHappen))
-    cell2.whenNextSequential(cell1, v => NextOutcome(ShouldNotHappen))
+    cell1.whenSequential(cell2, (v, _) => NextOutcome(ShouldNotHappen))
+    cell2.whenSequential(cell1, (v, _) => NextOutcome(ShouldNotHappen))
     out.putNext(ShouldNotHappen)
-    out.cell.whenComplete(cell1, v => FinalOutcome(OK))
+    out.cell.when(cell1, (v, _) => FinalOutcome(OK))
 
     val fut = pool.quiescentResolveCycles
     Await.ready(fut, 1.minutes)
@@ -2983,96 +1861,6 @@ class BaseSuite extends FunSuite {
     assert(cell1.getResult() != ShouldNotHappen)
     assert(cell2.getResult() != ShouldNotHappen)
     assert(out.cell.getResult() == OK)
-  }
-
-  test("whenCompleteSequential: calling sequentially") {
-    val n = 1000
-
-    val runningCallbacks = new AtomicInteger(0)
-    val latch = new CountDownLatch(1)
-    val random = new scala.util.Random()
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)
-
-    var otherLatches: Set[CountDownLatch] = Set.empty
-
-    val cell1 = completer1.cell
-    for (i <- 1 to n) {
-      val completer2 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)
-      val latch2 = new CountDownLatch(1)
-
-      otherLatches = otherLatches + latch2
-
-      completer2.cell.onComplete(_ => {
-        latch2.countDown()
-      })
-
-      cell1.whenCompleteSequential(completer2.cell, (x: Int) => {
-        assert(runningCallbacks.incrementAndGet() == 1)
-        Thread.`yield`()
-        try {
-          Thread.sleep(random.nextInt(3))
-        } catch {
-          case _: InterruptedException => /* ignore */
-        }
-        assert(runningCallbacks.decrementAndGet() == 0)
-        Outcome(x * n, x == n)
-      })
-
-      cell1.onComplete(_ => {
-        latch.countDown()
-      })
-
-      pool.execute(() =>
-        completer2.putFinal(i))
-    }
-
-    latch.await()
-    otherLatches.foreach(_.await())
-
-    assert(cell1.getResult() == n * n)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenNextSequential: calling sequentially") {
-    val n = 1000
-
-    val runningCallbacks = new AtomicInteger(0)
-    val latch = new CountDownLatch(1)
-    val random = new scala.util.Random()
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
-    val completer2 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      assert(runningCallbacks.incrementAndGet() == 1)
-      Thread.`yield`()
-      try {
-        Thread.sleep(random.nextInt(3))
-      } catch {
-        case _: InterruptedException => /* ignore */
-      }
-      assert(runningCallbacks.decrementAndGet() == 0)
-      Outcome(x * n, x == n)
-    })
-
-    cell1.onComplete(_ => {
-      latch.countDown()
-    })
-
-    for (i <- 1 to n)
-      pool.execute(() => completer2.putNext(i))
-
-    latch.await()
-
-    assert(cell1.getResult() == n * n)
-    assert(completer2.cell.getResult() == n)
-
-    pool.onQuiescenceShutdown()
   }
 
   test("whenSequential: calling sequentially") {
@@ -3087,7 +1875,7 @@ class BaseSuite extends FunSuite {
     val completer2 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
 
     val cell1 = completer1.cell
-    cell1.whenSequential(completer2.cell, (x: Int, _) => {
+    cell1.whenSequential(completer2.cell, (x, _) => {
       assert(runningCallbacks.incrementAndGet() == 1)
       Thread.`yield`()
       try {
@@ -3099,8 +1887,8 @@ class BaseSuite extends FunSuite {
       Outcome(x * n, x == n)
     })
 
-    cell1.onComplete(_ => {
-      latch.countDown()
+    cell1.on((_, isFinal) =>{
+      if (isFinal) latch.countDown()
     })
 
     for (i <- 1 to n)
@@ -3113,99 +1901,7 @@ class BaseSuite extends FunSuite {
 
     pool.onQuiescenceShutdown()
   }
-
-  test("whenNextSequential: state") {
-    val n = 1000
-    var count = 0
-
-    val runningCallbacks = new AtomicInteger(0)
-    val latch = new CountDownLatch(1)
-    val random = new scala.util.Random()
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      assert(runningCallbacks.incrementAndGet() == 1)
-      count += 1
-      Thread.`yield`()
-      try {
-        Thread.sleep(random.nextInt(3))
-      } catch {
-        case _: InterruptedException => /* ignore */
-      }
-      assert(runningCallbacks.decrementAndGet() == 0)
-      Outcome(count, count == n)
-    })
-
-    cell1.onComplete(_ => {
-      latch.countDown()
-    })
-
-    for (i <- 1 to n)
-      pool.execute(() => completer2.putNext(i))
-
-    latch.await()
-
-    assert(cell1.getResult() == n)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenCompleteSequential: state") {
-    val n = 1000
-    var count = 0
-
-    val runningCallbacks = new AtomicInteger(0)
-    val latch = new CountDownLatch(1)
-    var otherLatches: Set[CountDownLatch] = Set.empty
-    val random = new scala.util.Random()
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val cell1 = completer1.cell
-
-    for (i <- 1 to n) {
-      val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-      val latch2 = new CountDownLatch(1)
-      otherLatches = otherLatches + latch2
-
-      completer2.cell.onComplete(_ => {
-        latch2.countDown()
-      })
-
-      cell1.whenNextSequential(completer2.cell, (x: Int) => {
-        assert(runningCallbacks.incrementAndGet() == 1)
-        count += 1
-        Thread.`yield`()
-        try {
-          Thread.sleep(random.nextInt(3))
-        } catch {
-          case _: InterruptedException => /* ignore */
-        }
-        assert(runningCallbacks.decrementAndGet() == 0)
-        Outcome(count, count == n)
-      })
-
-      cell1.onComplete(_ => {
-        latch.countDown()
-      })
-
-      pool.execute(() => completer2.putFinal(i))
-
-    }
-
-    latch.await()
-    otherLatches.foreach(_.await())
-
-    assert(cell1.getResult() == n)
-
-    pool.onQuiescenceShutdown()
-  }
-
+  
   test("whenSequential: state") {
     val n = 1000
     var count = 0
@@ -3225,11 +1921,11 @@ class BaseSuite extends FunSuite {
       val latch2 = new CountDownLatch(1)
       otherLatches = otherLatches + latch2
 
-      completer2.cell.onComplete(_ => {
+      completer2.cell.on((_, _) =>{
         latch2.countDown()
       })
 
-      cell1.whenSequential(completer2.cell, (x: Int, _) => {
+      cell1.whenSequential(completer2.cell, (x, _) => {
         assert(runningCallbacks.incrementAndGet() == 1)
         count += 1
         Thread.`yield`()
@@ -3242,8 +1938,8 @@ class BaseSuite extends FunSuite {
         Outcome(count, count == n)
       })
 
-      cell1.onComplete(_ => {
-        latch.countDown()
+      cell1.on((_, isFinal) =>{
+        if (isFinal) latch.countDown()
       })
 
       pool.execute(() => completer2.putFinal(i))
@@ -3254,53 +1950,6 @@ class BaseSuite extends FunSuite {
     otherLatches.foreach(_.await())
 
     assert(cell1.getResult() == n)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenComplete: called at most once") {
-    implicit val intMaxLattice: Lattice[Int] = new Lattice[Int] {
-      override def join(x: Int, y: Int): Int = Math.max(x, y)
-      val bottom = 0
-    }
-    val key = new lattice.DefaultKey[Int]
-
-    implicit val pool = new HandlerPool
-
-    for (_ <- 1 to 100) {
-      val latch = new CountDownLatch(1)
-      val completer1 = CellCompleter[key.type, Int](key)
-      val completer2 = CellCompleter[key.type, Int](key)
-      var called = 0
-      completer2.cell.whenComplete(completer1.cell, _ => {
-        assert(called === 0)
-        called += 1
-        latch.countDown()
-        NoOutcome
-      })
-
-      // complete cell
-      completer1.putFinal(5)
-
-      // put a higher value
-      try completer1.putFinal(6) catch {
-        case _: IllegalStateException => /* ignore */
-      }
-
-      // put a lower value
-      try completer1.putFinal(4) catch {
-        case _: IllegalStateException => /* ignore */
-      }
-
-      // put the same value
-      try completer1.putFinal(5) catch {
-        case _: IllegalStateException => /* ignore */
-      }
-
-      latch.await()
-
-      assert(called === 1)
-    }
 
     pool.onQuiescenceShutdown()
   }
@@ -3353,7 +2002,7 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNextSequential: discard callbacks on completion") {
+  test("whenSequential: discard callbacks on completion") {
     val latch1 = new CountDownLatch(1)
     val latch2 = new CountDownLatch(1)
 
@@ -3366,7 +2015,7 @@ class BaseSuite extends FunSuite {
     val cell2 = completer2.cell
     cell1.trigger()
 
-    cell1.whenNextSequential(cell2, v => {
+    cell1.whenSequential(cell2, (v, _) => {
       latch1.await() // wait for some puts/triggers
       FinalOutcome(n)
     })
@@ -3412,7 +2061,7 @@ class BaseSuite extends FunSuite {
     val cell20 = completer20.cell
 
     completer2.putNext(1)
-    cell2.whenNext(cell1, x => {
+    cell2.when(cell1, (x, isFinal) => {
       if (x == 42) {
         completer2.putFinal(43)
       }
@@ -3420,7 +2069,7 @@ class BaseSuite extends FunSuite {
     })
 
     completer20.putNext(1)
-    cell20.whenNext(cell10, x => {
+    cell20.when(cell10, (x, isFinal) => {
       if (x == 10) {
         completer20.putFinal(43)
       }
@@ -3430,7 +2079,7 @@ class BaseSuite extends FunSuite {
     completer1.putNext(10)
     completer10.putNext(10)
 
-    cell1.whenNext(cell1, _ => {
+    cell1.when(cell1, (_, _) => {
       NoOutcome
     })
 
@@ -3447,46 +2096,6 @@ class BaseSuite extends FunSuite {
 
   }
 
-  test("whenCompleteSequential: discard callbacks on completion") {
-    val latch1 = new CountDownLatch(1)
-    val latch2 = new CountDownLatch(1)
-
-    implicit val pool = new HandlerPool
-
-    val completer1 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)
-    val completer2 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)
-    val completer3 = CellCompleter[lattice.NaturalNumberKey.type, Int](lattice.NaturalNumberKey)
-    val cell1 = completer1.cell
-    val cell2 = completer2.cell
-    val cell3 = completer3.cell
-    cell1.trigger()
-
-    cell1.whenCompleteSequential(cell2, v => {
-      latch1.await() // wait for some puts/triggers
-      FinalOutcome(10)
-    })
-    cell1.whenCompleteSequential(cell3, NextOutcome(_))
-
-    completer2.putFinal(3)
-    completer3.putNext(2)
-    completer3.putNext(3)
-    latch1.countDown()
-
-    pool.onQuiescent(() => {
-      pool.onQuiescenceShutdown()
-      latch2.countDown()
-    })
-    // pool needs to reach quiescence, even if cell1 is completed early:
-    latch2.await()
-
-    assert(cell1.getResult() == 10)
-    assert(cell2.getResult() == 3)
-    assert(cell3.getResult() == 3)
-    assert(cell1.isComplete)
-    assert(cell2.isComplete)
-    assert(!cell3.isComplete)
-  }
-
   test("recursive quiescentResolveCycles") {
     implicit val pool = new HandlerPool
     val completer1 = CellCompleter[RecursiveQuiescentTestKey, Int](new RecursiveQuiescentTestKey)
@@ -3494,12 +2103,12 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    cell1.whenNext(cell1, x => {
+    cell1.when(cell1, (x, isFinal) => {
       Thread.sleep(200)
       NoOutcome
     })
 
-    cell2.whenNext(cell1, x => {
+    cell2.when(cell1, (x, isFinal) => {
       Thread.sleep(200)
       FinalOutcome(x * 2)
     })
@@ -3520,7 +2129,7 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    cell2.whenNext(cell1, x => {
+    cell2.when(cell1, (x, isFinal) => {
       Thread.sleep(200)
       FinalOutcome(x * 2)
     })
@@ -3541,12 +2150,12 @@ class BaseSuite extends FunSuite {
     val cell2 = completer2.cell
     cell2.trigger()
 
-    cell1.whenNext(cell1, x => {
+    cell1.when(cell1, (x, isFinal) => {
       Thread.sleep(200)
       NoOutcome
     })
 
-    cell2.whenNext(cell1, x => {
+    cell2.when(cell1, (x, isFinal) => {
       Thread.sleep(200)
       FinalOutcome(x * 2)
     })
@@ -3567,7 +2176,7 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    cell1.whenNext(cell2, x => {
+    cell1.when(cell2, (x, isFinal) => {
       Thread.sleep(200)
       FinalOutcome(x * 2)
     })
@@ -3598,7 +2207,7 @@ class BaseSuite extends FunSuite {
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    cell1.whenNext(cell2, x => {
+    cell1.when(cell2, (x, isFinal) => {
       FinalOutcome(1)
     })
 

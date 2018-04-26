@@ -259,9 +259,9 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
               project.classFile(f.fieldType.asObjectType) match {
                 case Some(classFile) =>
                   val fieldTypeCell = classFileToObjectTypeCellCompleter(classFile)._2.cell
-                  cellCompleter.cell.whenNext(
+                  cellCompleter.cell.when(
                     fieldTypeCell,
-                    (fieldImm: Immutability) => fieldImm match {
+                    (fieldImm, _) => fieldImm match {
                       case Mutable | ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
                       case Immutable => NoOutcome
                     })
@@ -277,9 +277,9 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
         map(superType => project.classFile(superType).get)
 
       directSuperClasses foreach { superClass =>
-        cellCompleter.cell.whenNext(
+        cellCompleter.cell.when(
           classFileToObjectTypeCellCompleter(superClass)._1.cell,
-          (imm: Immutability) => imm match {
+          (imm, _) => imm match {
             case Immutable => NoOutcome
             case Mutable => FinalOutcome(Mutable)
             case ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
@@ -309,9 +309,9 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
       // If this class file doesn't have subtypes, then the TypeImmutability is the same as
       // the ObjectImmutability
       if (cf.isFinal || directSubtypes.isEmpty) {
-        cellCompleter.cell.whenNext(
-          classFileToObjectTypeCellCompleter(cf)._1.cell,
-          _ match {
+        cellCompleter.cell.when(
+          classFileToObjectTypeCellCompleter(cf)._1.cell, (x, _) =>
+          x match {
             case Immutable => NoOutcome
             case Mutable => FinalOutcome(Mutable)
             case ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
@@ -325,9 +325,9 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
           // Check subclasses to determine TypeImmutability
           val directSubclasses = directSubtypes map { subtype ⇒ project.classFile(subtype).get }
           directSubclasses foreach { subclass =>
-            cellCompleter.cell.whenNext(
-              classFileToObjectTypeCellCompleter(subclass)._2.cell,
-              _ match {
+            cellCompleter.cell.when(
+              classFileToObjectTypeCellCompleter(subclass)._2.cell, (x, _) =>
+              x match {
                 case Immutable => NoOutcome
                 case Mutable => FinalOutcome(Mutable)
                 case ConditionallyImmutable => NextOutcome(ConditionallyImmutable)

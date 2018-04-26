@@ -19,7 +19,7 @@ class PsSuite extends FunSuite {
     cell1.trigger()
     completer1.putNext(10)
 
-    cell1.whenNextSequential(cell1, _ => {
+    cell1.whenSequential(cell1, (_, _) => {
       NoOutcome
     })
 
@@ -45,7 +45,7 @@ class PsSuite extends FunSuite {
     val cell20 = completer20.cell
 
     completer2.putNext(1)
-    cell2.whenNext(cell1, x => {
+    cell2.when(cell1, (x, _) => {
       if (x == 42) {
         completer2.putFinal(43)
       }
@@ -53,7 +53,7 @@ class PsSuite extends FunSuite {
     })
 
     completer20.putNext(1)
-    cell20.whenNextSequential(cell10, x => {
+    cell20.whenSequential(cell10, (x, _) => {
       if (x == 10) {
         completer20.putFinal(43)
       }
@@ -62,7 +62,7 @@ class PsSuite extends FunSuite {
 
     completer1.putNext(10)
 
-    cell1.whenNext(cell1, _ => {
+    cell1.when(cell1, (_, _) => {
       NoOutcome
     })
 
@@ -95,7 +95,7 @@ class PsSuite extends FunSuite {
     cell1.trigger()
     completer1.putNext(10)
 
-    cell1.whenNextSequential(cell1, _ => {
+    cell1.whenSequential(cell1, (x, _) => {
       NoOutcome
     })
 

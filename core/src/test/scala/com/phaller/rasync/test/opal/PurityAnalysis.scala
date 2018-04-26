@@ -164,7 +164,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 
                 val targetCell = methodToCell(callee)
                 hasDependencies = true
-                cell.whenComplete(targetCell, p => if (p == Impure) FinalOutcome(Impure) else NoOutcome)
+                cell.when(targetCell, (p, _) => if (p == Impure) FinalOutcome(Impure) else NoOutcome)
 
               case _ /* Empty or Failure */ ⇒
 
