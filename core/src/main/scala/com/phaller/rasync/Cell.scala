@@ -640,12 +640,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         if (nextCallbacks.nonEmpty)
           nextCallbacks.values.foreach { callbacks =>
-              callbacks.foreach(callback => callback.execute())
+            callbacks.foreach(callback => callback.execute())
           }
 
         if (completeCallbacks.nonEmpty)
           completeCallbacks.values.foreach { callbacks =>
-              callbacks.foreach(callback => callback.execute())
+            callbacks.foreach(callback => callback.execute())
           }
 
         val depsCells = pre.completeDeps
@@ -712,7 +712,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-
   @tailrec
   override final def removeCompleteCallbacks(cell: Cell[K, V]): Unit = {
     state.get() match {
@@ -754,7 +753,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       case _ => /* do nothing */
     }
   }
-
 
   @tailrec
   override private[rasync] final def removeAllCallbacks(cell: Cell[K, V]): Unit = {

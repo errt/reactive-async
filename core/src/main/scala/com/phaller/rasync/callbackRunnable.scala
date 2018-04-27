@@ -328,44 +328,47 @@ private[rasync] abstract class CombinedDepRunnable[K <: Key[V], V](
   override val dependentCompleter: CellCompleter[K, V],
   override val otherCell: Cell[K, V],
   override val valueCallback: (V, Boolean) => Outcome[V]) extends CombinedCallbackRunnable[K, V](pool, dependentCompleter.cell, otherCell, (t, isFinal) => {
-  if (isFinal) t match {
-    case Success(x) =>
-      valueCallback(x, true) match {
-        case FinalOutcome(v) =>
-          dependentCompleter.putFinal(v) // deps will be removed by putFinal()
-        case NextOutcome(v) =>
-          dependentCompleter.putNext(v)
-          dependentCompleter.removeDep(otherCell)
-          dependentCompleter.removeNextDep(otherCell)
-          dependentCompleter.removeCombinedDep(otherCell)
-        case NoOutcome =>
-          dependentCompleter.removeDep(otherCell)
-          dependentCompleter.removeNextDep(otherCell)
-          dependentCompleter.removeCombinedDep(otherCell)
-      }
-    case Failure(_) =>
-      dependentCompleter.removeDep(otherCell)
-      dependentCompleter.removeNextDep(otherCell)
-      dependentCompleter.removeCombinedDep(otherCell)
-  }
-  else {
-    // Copied from NextDepRunnable
-    t match {
-      case Success(_) =>
-        valueCallback(otherCell.getResult(), false) match {
+  if (!dependentCompleter.cell.isComplete) {
+
+    if (isFinal) t match {
+      case Success(x) =>
+        valueCallback(x, true) match {
+          case FinalOutcome(v) =>
+            dependentCompleter.putFinal(v) // deps will be removed by putFinal()
           case NextOutcome(v) =>
             dependentCompleter.putNext(v)
-          case FinalOutcome(v) =>
-            dependentCompleter.putFinal(v)
-          case _ => /* do nothing */
+            dependentCompleter.removeDep(otherCell)
+            dependentCompleter.removeNextDep(otherCell)
+            dependentCompleter.removeCombinedDep(otherCell)
+          case NoOutcome =>
+            dependentCompleter.removeDep(otherCell)
+            dependentCompleter.removeNextDep(otherCell)
+            dependentCompleter.removeCombinedDep(otherCell)
         }
-      case Failure(_) => /* do nothing */
+      case Failure(_) =>
+        dependentCompleter.removeDep(otherCell)
+        dependentCompleter.removeNextDep(otherCell)
+        dependentCompleter.removeCombinedDep(otherCell)
     }
+    else {
+      // Copied from NextDepRunnable
+      t match {
+        case Success(_) =>
+          valueCallback(otherCell.getResult(), false) match {
+            case NextOutcome(v) =>
+              dependentCompleter.putNext(v)
+            case FinalOutcome(v) =>
+              dependentCompleter.putFinal(v)
+            case _ => /* do nothing */
+          }
+        case Failure(_) => /* do nothing */
+      }
 
-    // Remove the dependency, if `otherCell` is complete.
-    // There is no need to removeCompleteDeps, because if those existed,
-    // a CompleteDepRunnable would have been called and removed the dep
-    if (otherCell.isComplete) dependentCompleter.removeNextDep(otherCell)
+      // Remove the dependency, if `otherCell` is complete.
+      // There is no need to removeCompleteDeps, because if those existed,
+      // a CompleteDepRunnable would have been called and removed the dep
+      if (otherCell.isComplete) dependentCompleter.removeNextDep(otherCell)
+    }
   }
 }) with CombinedDependency[K, V]
 
