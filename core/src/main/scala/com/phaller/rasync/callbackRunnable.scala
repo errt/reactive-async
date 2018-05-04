@@ -1,10 +1,12 @@
 package com.phaller.rasync
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 import lattice.Key
 
 import scala.concurrent.OnCompleteRunnable
 import scala.util.control.NonFatal
-import scala.util.{ Failure, Success, Try }
+import scala.util.{Failure, Success, Try}
 
 /**
  * Run a callback in a handler pool, if a value in a cell changes.
@@ -284,6 +286,8 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
   val callback: (Try[V], Boolean) => Any)
   extends CallbackRunnable[K, V] {
 
+  private val triggeredWithFinal = new AtomicBoolean(false)
+
   def run(): Unit = {
     // It is important to call isComplete first
     // otherwise, isComplete could return true, while
@@ -291,13 +295,18 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
     val isComplete = otherCell.isComplete
     val value = otherCell.getResult()
 
-    if (sequential) {
-      dependentCell.synchronized {
+    // We only trigger the callback, if the update is intermediate
+    // or we have not propageted a final value before.
+    // This avoids repeated invocations of the callback with the
+    // same arguments, where isFinal==true.
+    if (!isComplete || !triggeredWithFinal.getAndSet(true))
+      if (sequential) {
+        dependentCell.synchronized {
+          callback(Success(value), isComplete)
+        }
+      } else {
         callback(Success(value), isComplete)
       }
-    } else {
-      callback(Success(value), isComplete)
-    }
   }
 }
 
@@ -330,25 +339,27 @@ private[rasync] abstract class CombinedDepRunnable[K <: Key[V], V](
   override val valueCallback: (V, Boolean) => Outcome[V]) extends CombinedCallbackRunnable[K, V](pool, dependentCompleter.cell, otherCell, (t, isFinal) => {
   if (!dependentCompleter.cell.isComplete) {
 
-    if (isFinal) t match {
-      case Success(x) =>
-        valueCallback(x, true) match {
-          case FinalOutcome(v) =>
-            dependentCompleter.putFinal(v) // deps will be removed by putFinal()
-          case NextOutcome(v) =>
-            dependentCompleter.putNext(v)
-            dependentCompleter.removeDep(otherCell)
-            dependentCompleter.removeNextDep(otherCell)
-            dependentCompleter.removeCombinedDep(otherCell)
-          case NoOutcome =>
-            dependentCompleter.removeDep(otherCell)
-            dependentCompleter.removeNextDep(otherCell)
-            dependentCompleter.removeCombinedDep(otherCell)
-        }
-      case Failure(_) =>
-        dependentCompleter.removeDep(otherCell)
-        dependentCompleter.removeNextDep(otherCell)
-        dependentCompleter.removeCombinedDep(otherCell)
+    if (isFinal) {
+      t match {
+        case Success(x) =>
+          valueCallback(x, true) match {
+            case FinalOutcome(v) =>
+              dependentCompleter.putFinal(v) // deps will be removed by putFinal()
+            case NextOutcome(v) =>
+              dependentCompleter.putNext(v)
+              dependentCompleter.removeDep(otherCell)
+              dependentCompleter.removeNextDep(otherCell)
+              dependentCompleter.removeCombinedDep(otherCell)
+            case NoOutcome =>
+              dependentCompleter.removeDep(otherCell)
+              dependentCompleter.removeNextDep(otherCell)
+              dependentCompleter.removeCombinedDep(otherCell)
+          }
+        case Failure(_) =>
+          dependentCompleter.removeDep(otherCell)
+          dependentCompleter.removeNextDep(otherCell)
+          dependentCompleter.removeCombinedDep(otherCell)
+      }
     }
     else {
       // Copied from NextDepRunnable
