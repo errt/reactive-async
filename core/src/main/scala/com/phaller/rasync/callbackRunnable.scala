@@ -295,11 +295,16 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
     val isComplete = otherCell.isComplete
     val value = otherCell.getResult()
 
-    // We only trigger the callback, if the update is intermediate
-    // or we have not propageted a final value before.
-    // This avoids repeated invocations of the callback with the
-    // same arguments, where isFinal==true.
-    if (!isComplete || !triggeredWithFinal.getAndSet(true))
+    // We only trigger the callback, if
+    // we have not propageted a final value before.
+    val propagate =
+      if (isComplete) {
+        !triggeredWithFinal.getAndSet(true)
+      } else {
+        !triggeredWithFinal.get
+      }
+
+    if (propagate)
       if (sequential) {
         dependentCell.synchronized {
           callback(Success(value), isComplete)
@@ -365,7 +370,9 @@ private[rasync] abstract class CombinedDepRunnable[K <: Key[V], V](
       // Copied from NextDepRunnable
       t match {
         case Success(_) =>
-          valueCallback(otherCell.getResult(), false) match {
+          val isComplete = otherCell.isComplete
+          val value = otherCell.getResult()
+          valueCallback(value, isComplete) match {
             case NextOutcome(v) =>
               dependentCompleter.putNext(v)
             case FinalOutcome(v) =>

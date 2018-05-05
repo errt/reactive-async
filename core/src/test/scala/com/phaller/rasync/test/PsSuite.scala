@@ -1,6 +1,8 @@
 package com.phaller.rasync
 package test
 
+import java.util.concurrent.CountDownLatch
+
 import lattice._
 import org.scalatest.FunSuite
 
@@ -101,6 +103,116 @@ class PsSuite extends FunSuite {
 
     val fut = pool.quiescentResolveDefaults
     Await.ready(fut, 2.seconds)
+  }
+
+//
+//  test("cell must receive final update only once") {
+//    implicit val pool = new HandlerPool(parallelism = 8)
+//    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+//    val completer2 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+//    val cell1 = completer1.cell
+//    val cell2 = completer2.cell
+//
+//    val latch = new CountDownLatch(1)
+//
+//    var nonFinalAndVis3 = false
+//
+//    cell2.whenSequential(cell1, (v, isFinal) => {
+//      latch.await()
+//      println(s"$v - $isFinal")
+//
+//      if (!isFinal && v == 3) {
+//        nonFinalAndVis3 = true
+//      }
+//
+//      NoOutcome
+//    })
+//
+//    completer1.putNext(1)
+//    Thread.sleep(200)
+//    completer1.putNext(2)
+//    Thread.sleep(200)
+//    completer1.putFinal(3)
+//
+//    cell1.removeNextCallbacks(cell2)
+//
+//    latch.countDown()
+//
+//    pool.onQuiescenceShutdown()
+//
+//    assert(!nonFinalAndVis3)
+//  }
+
+  test("cell must receive final update only once 2") {
+    implicit val pool = new HandlerPool(parallelism = 8)
+    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer2 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val cell1 = completer1.cell
+    val cell2 = completer2.cell
+
+    val latch = new CountDownLatch(1)
+
+    var timesFinalUpdates = 0
+
+    cell2.whenSequential(cell1, (v, isFinal) => {
+      latch.await()
+      println(s"$v - $isFinal")
+
+      if (isFinal)
+        timesFinalUpdates += 1
+
+      NoOutcome
+    })
+
+    completer1.putNext(1)
+    Thread.sleep(200)
+    completer1.putNext(2)
+    completer1.putFinal(3)
+
+    cell1.removeNextCallbacks(cell2)
+
+    latch.countDown()
+
+    val fut = pool.quiescentResolveDefaults
+    Await.ready(fut, 2.seconds)
+
+    assert(timesFinalUpdates == 1)
+  }
+
+  test("cell must not receive non-final update after final one") {
+    implicit val pool = new HandlerPool(parallelism = 8)
+    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer2 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val cell1 = completer1.cell
+    val cell2 = completer2.cell
+
+    val latch = new CountDownLatch(1)
+
+    var sawFinalUpdate = false
+    var sawUpdateAfterFinal = false
+
+    cell2.whenSequential(cell1, (v, isFinal) => {
+      latch.await()
+      println(s"$v - $isFinal")
+
+      if (isFinal) sawFinalUpdate = true
+      if (sawFinalUpdate && !isFinal) sawUpdateAfterFinal = true
+
+      NoOutcome
+    })
+
+    completer1.putNext(1)
+    Thread.sleep(200)
+    completer1.putNext(2)
+    Thread.sleep(200)
+    completer1.putFinal(3)
+
+    latch.countDown()
+
+    pool.onQuiescenceShutdown()
+
+    assert(sawFinalUpdate)
+    assert(!sawUpdateAfterFinal)
   }
 
 }
