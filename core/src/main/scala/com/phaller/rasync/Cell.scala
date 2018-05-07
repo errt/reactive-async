@@ -81,10 +81,10 @@ trait Cell[K <: Key[V], V] {
 
   // internal API
 
-  // Schedules execution of `callback` when next intermediate result is available.
+  // Schedules execution of `callback` when next intermediate result is available. (not thread safe!)
   private[rasync] def onNext[U](callback: Try[V] => U): Unit //(implicit context: ExecutionContext): Unit
 
-  // Schedules execution of `callback` when completed with final result.
+  // Schedules execution of `callback` when completed with final result. (not thread safe!)
   private[rasync] def onComplete[U](callback: Try[V] => U): Unit
 
   // Only used in tests.
@@ -116,11 +116,16 @@ trait Cell[K <: Key[V], V] {
   def removeCompleteCallbacks(cell: Cell[K, V]): Unit
   def removeNextCallbacks(cell: Cell[K, V]): Unit
 
+  /** Removes all callbacks that are called, when `cell` has been updated.
+    * I.e., this method kills the dependency on the dependee's side.
+    *
+    * Use removeDependentCell to remove the dependency on the other side.
+    */
   private[rasync] def removeAllCallbacks(cell: Cell[K, V]): Unit
   private[rasync] def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit
 
   private[rasync] def updateDeps(): Unit
-  private[rasync] def resultChanged(dependentCell: Cell[K, V]): Outcome[V]
+  private[rasync] def getStagedValueFor(dependentCell: Cell[K, V]): Outcome[V]
 
   def isADependee(): Boolean
 }
@@ -169,20 +174,21 @@ object Cell {
  * This is not a case class, since it is important that equality is by-reference.
  *
  * @param res       current intermediate result (optional)
- * @param deps      dependent Cells + indication if value changed since last read
- * @param callbacks list of registered call-back runnables
+ * @param deps      dependent Cells + a staged value for this cell (this is not needed for completeDeps, the staged value is always the final one)
+ * @param callbacks those callbacks are run if the cell t(hat we depend on) changes.
  */
 private class State[K <: Key[V], V](
      val res: V,
      val tasksActive: Boolean,
-     val completeDependentCells: Map[Cell[K, V], Boolean],
-     val completeCallbacks: Map[Cell[K, V], List[CompleteCallbackRunnable[K, V]]],
-     val nextDependentCells: Map[Cell[K, V], Boolean],
-     val nextCallbacks: Map[Cell[K, V], List[NextCallbackRunnable[K, V]]])
+     val completeDependentCells: List[Cell[K, V]],
+     val completeCallbacks: Map[Cell[K, V], CompleteCallbackRunnable[K, V]],
+     val nextDependentCells: Map[Cell[K, V], Outcome[V]],
+     val nextCallbacks: Map[Cell[K, V], NextCallbackRunnable[K, V]]
+)
 
 private object State {
   def empty[K <: Key[V], V](updater: Updater[V]): State[K, V] =
-    new State[K, V](updater.bottom, false, Map(), Map(), Map(), Map())
+    new State[K, V](updater.bottom, false, List(), Map(), Map(), Map())
 }
 
 private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
@@ -204,6 +210,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    * IllegalStateExceptions.
    */
   private val state = new AtomicReference[AnyRef](State.empty[K, V](updater))
+
+  private var onCompleteHandler: List[Try[V] => Any] = List()
+  private var onNextHandler: List[Try[V] => Any] = List()
 
   // `CellCompleter` and corresponding `Cell` are the same run-time object.
   override def cell: Cell[K, V] = this
@@ -377,10 +386,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
                 if (sequential) new NextSequentialDepRunnable(pool, this, other, valueCallback)
                 else new NextConcurrentDepRunnable(pool, this, other, valueCallback)
 
-              val newState = current.nextCallbacks.contains(other) match {
-                case true => new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells, current.nextCallbacks + (other -> (newCallback :: current.nextCallbacks(other))))
-                case false => new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells, current.nextCallbacks + (other -> List(newCallback)))
-              }
+              val newState = new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells, current.nextCallbacks + (other -> newCallback ))
+              // TODO Check, what we need to do, if a callback has been registered already
               state.compareAndSet(current, newState)
             }
           if (depRegistered) {
@@ -418,10 +425,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
                 if (sequential) new CompleteSequentialDepRunnable(pool, this, other, valueCallback)
                 else new CompleteConcurrentDepRunnable(pool, this, other, valueCallback)
 
-              val newState = current.completeCallbacks.contains(other) match {
-                case true => new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks + (other -> (newCallback :: current.completeCallbacks(other))), current.nextDependentCells, current.nextCallbacks )
-                case false => new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks + (other -> List(newCallback)), current.nextDependentCells, current.nextCallbacks)
-              }
+              val newState = new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks + (other -> newCallback ), current.nextDependentCells, current.nextCallbacks)
+              // TODO see whenNext
               state.compareAndSet(current, newState)
             }
           if (depRegistered) {
@@ -458,27 +463,28 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   @tailrec
   private[rasync] final def tryNewState(value: V): Boolean = {
     state.get() match {
-      case finalRes: Try[_] => // completed with final result already
-        try {
-          val finalResult = finalRes.asInstanceOf[Try[V]].get
-          val newVal = tryJoin(finalResult, value)
-          val res = finalRes == Success(newVal)
-          res
-        } catch {
-          case _: NotMonotonicException[_] => false
-        }
+      case _: Try[_] => // completed with final result already
+        true // As decided by phaller,  we ignore all updates after freeze and do not throw exceptions
+
       case raw: State[_, _] => // not completed
         val current = raw.asInstanceOf[State[K, V]]
         val newVal = tryJoin(current.res, value)
-        val newNextDeps = current.nextDependentCells.map(cb => (cb._1, true))
         if (current.res != newVal) {
-          val newState = new State(newVal, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDeps, current.nextCallbacks)
+
+          // create "staging" for dependent cells.
+          // To avoid several compareAndSets, this is not moved to a different method
+          val newNextDeps = current.nextDependentCells.map {
+            case (c, _) => (c, NextOutcome(newVal))
+          }
+
+          val newState = new State(newVal, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells, current.nextCallbacks)
           if (!state.compareAndSet(current, newState)) {
             tryNewState(value)
           } else {
             // CAS was successful, so there was a point in time where `newVal` was in the cell
             // every dependent cell should pull the new value
-            newNextDeps.foreach(_._1.updateDeps())
+            onNextHandler.foreach(_.apply(Success(newVal)))
+            current.nextDependentCells.foreach(_._1.updateDeps())
             true
           }
         } else true
@@ -510,14 +516,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
     // the only call to `tryCompleteAndGetState`
     val res = tryCompleteAndGetState(resolved) match {
-      case finalRes: Try[_] => // was already complete
-        val finalResult = finalRes.asInstanceOf[Try[V]].get
-        val newVal = value.map(tryJoin(finalResult, _))
-        val res = finalRes == newVal
-        res
+      case _: Try[_] => // was already complete
+        true // As decided by phaller,  we ignore all updates after freeze and do not throw exceptions
 
       case (pre: State[K, V], _) =>
-        pre.completeDependentCells.foreach(_._1.updateDeps())
+        pre.completeDependentCells.foreach(_.updateDeps())
         pre.nextDependentCells.foreach(_._1.updateDeps())
 
         // we do not need to be informed of changes of other cells
@@ -538,6 +541,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       val current = pre.asInstanceOf[State[K, V]]
       val newCompleteDeps = current.completeDependentCells - cell
       val newNextDeps = current.nextDependentCells - cell
+
       val newState = new State(current.res, current.tasksActive, newCompleteDeps, current.completeCallbacks, newNextDeps, current.nextCallbacks)
       if (!state.compareAndSet(current, newState))
         removeDependentCell(dependentCell)
@@ -547,15 +551,15 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   @tailrec
-  override private[rasync] final def removeDep(cell: Cell[K, V]): Unit = {
+  override private[rasync] final def removeCompleteDepentCell(cell: Cell[K, V]): Unit = {
     state.get() match {
       case pre: State[_, _] =>
         val current = pre.asInstanceOf[State[K, V]]
-        val newDeps = current.completeDependentCells - cell
+        val newDeps = current.completeDependentCells.filterNot(_ == cell)
 
         val newState = new State(current.res, current.tasksActive, newDeps, current.completeCallbacks, current.nextDependentCells, current.nextCallbacks)
         if (!state.compareAndSet(current, newState))
-          removeDep(cell)
+          removeCompleteDepentCell(cell)
         else if (newDeps.isEmpty)
           nodepslatch.countDown()
 
@@ -564,7 +568,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   @tailrec
-  override private[rasync] final def removeNextDep(cell: Cell[K, V]): Unit = {
+  override private[rasync] final def removeNextDepentCell(cell: Cell[K, V]): Unit = {
     state.get() match {
       case pre: State[_, _] =>
         val current = pre.asInstanceOf[State[K, V]]
@@ -572,7 +576,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         val newState = new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDeps, current.nextCallbacks)
         if (!state.compareAndSet(current, newState))
-          removeNextDep(cell)
+          removeNextDepentCell(cell)
         else if (newNextDeps.isEmpty)
           nonextdepslatch.countDown()
 
@@ -672,14 +676,18 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   // Schedules execution of `callback` when next intermediate result is available.
   override private[rasync] def onNext[U](callback: Try[V] => U): Unit = {
-    val runnable = new NextConcurrentCallbackRunnable[K, V](pool, null, this, callback) // NULL indicates that no cell is waiting for this callback.
-    triggerOrAddNextDependentCell(runnable)
+    case pre: State[_, _] =>
+      if (getResult() != updater.bottom) callback(Success(getResult()))
+      onNextHandler =  callback :: onNextHandler
+    case _ => callback(Success(getResult()))
   }
 
   // Schedules execution of `callback` when completed with final result.
   override def onComplete[U](callback: Try[V] => U): Unit = {
-    val runnable = new CompleteConcurrentCallbackRunnable[K, V](pool, null, this, callback) // NULL indicates that no cell is waiting for this callback.
-    triggerOrAddCompleteDependentCell(runnable)
+    case pre: State[_, _] =>
+      if (getResult() != updater.bottom) callback(Success(getResult()))
+      onNextHandler =  callback :: onCompleteHandler
+    case _ => callback(Success(getResult()))
   }
 
   /**
@@ -695,25 +703,39 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     case pre: State[_, _] =>
       // assemble new state
       val current = pre.asInstanceOf[State[K, V]]
-      val newState = new State(current.res, current.tasksActive, current.completeDependentCells + (dependentCell -> false), current.completeCallbacks, current.nextDependentCells, current.nextCallbacks)
+      val newState = new State(current.res, current.tasksActive, current.completeDependentCells + (dependentCell -> FinalOutcome(current.res)), current.completeCallbacks, current.nextDependentCells, current.nextCallbacks)
       if (!state.compareAndSet(pre, newState))
         triggerOrAddCompleteDependentCell(dependentCell)
   }
 
-  private[rasync] def resultChanged(dependentCell: Cell[K, V]): Outcome[V] = state.get() match {
+  private[rasync] def getStagedValueFor(dependentCell: Cell[K, V]): Outcome[V] = state.get() match {
     case r: Try[_] =>
+      // We will infinitely return FinalOutcome
+      // so the dependent cell needs to remove the dependency, once
+      // the first FinalOutcome is seen.
+      // An alternative implementation was
+      // (1) to return "NoOutcome" here, but that would require the value passed to the callback runnable to be fixed, which could lead to more steps in the dependent cell
+      // (2) store the staging even after the cell is completed.
       FinalOutcome(r.asInstanceOf[Try[V]].get)
     case pre: State[_, _] =>
       // assemble new state
       val current = pre.asInstanceOf[State[K, V]]
       try
-        if (current.nextDependentCells(dependentCell))
-          NextOutcome(current.res)
-        else
-          NoOutcome
+        current.nextDependentCells(dependentCell) match {
+          case NoOutcome => NoOutcome /* just return that no new value is available. Own state does not need to be changed. */
+          case v@NextOutcome(_) =>
+            /* Return v but clear staging before. */
+
+            // NoOutcome signals, that the staged value has been pulled.
+            val newNextDependentCells = current.nextDependentCells + (dependentCell -> NoOutcome)
+            val newState = new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDependentCells, current.nextCallbacks)
+            if (!state.compareAndSet(current, newState)) getStagedValueFor(dependentCell) // try again
+            else v
+
+        }
       catch {
         case _: NoSuchElementException =>
-          throw new Exception(s"$dependentCell asked for a value of $this but was not registered as dependent cell.")
+          throw new NoSuchElementException(s"$dependentCell asked for a value of $this but was not registered as dependent cell.")
       }
   }
 
@@ -753,31 +775,35 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     case t => Failure(t)
   }
 
-  override private[rasync] def updateDeps(): Unit = state.get() match {
-    case pre: State[_, _] =>
-      val current = pre.asInstanceOf[State[K, V]]
+  override private[rasync] def updateDeps(): Unit = {
+    // eventually check on all cells that we depend on for new values
+    pool.execute(() => state.get() match {
+      case pre: State[_, _] =>
+        val current = pre.asInstanceOf[State[K, V]]
 
-      // TODO we should not simply call callback.execute() but instead avoid HandlerPool.cellsNotDone -> Queue altogether AND/OR: SequentialCallback.run() could use synchronized(dependentCell) {…}
-
-      current.completeCallbacks.foreach { case (other, callbacks) =>
-        other.resultChanged(this) match {
-          case _: FinalOutcome[_] =>
-            // TODO In this case, callbacks need to be removed!
-            callbacks.foreach(callback => callback.execute())
-          case _ => /* Do nothing for non-final values of `other`. */
+        var removeDeps = List[Cell[K, V]]()
+        current.completeCallbacks.foreach { case (other, callback) =>
+          other.getStagedValueFor(this) match {
+            case _: FinalOutcome[_] =>
+              callback.execute()
+              removeDeps = other :: removeDeps
+            case _ => /* Do nothing for non-final values of `other`. */
+          }
         }
-      }
 
-      current.nextCallbacks.foreach { case (other, callbacks) =>
-        other.resultChanged(this) match {
-          case Outcome(_, _) =>
-            callbacks.foreach(callback => callback.execute())
-          case NoOutcome => /* Do nothing for NoOutcome */
+        current.nextCallbacks.foreach { case (other, callback) =>
+          other.getStagedValueFor(this) match {
+            case Outcome(_, isFinal) =>
+              callback.execute()
+              if (isFinal) removeDeps = other :: removeDeps
+            case NoOutcome => /* Do nothing for NoOutcome */
+          }
         }
-      }
 
-    case _ => /* we are final already. TODO Do we need to do something? Probl. yes, to produce IllegalStateExceptions. */
+        this.removeAllCallbacks(removeDeps)
 
+      case _ => /* we are final already so we ignore all incoming information */
+    })
   }
 
   /**

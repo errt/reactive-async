@@ -22,8 +22,8 @@ trait CellCompleter[K <: Key[V], V] {
   private[rasync] def tryNewState(value: V): Boolean
   def tryComplete(value: Try[V]): Boolean
 
-  private[rasync] def removeDep(cell: Cell[K, V]): Unit
-  private[rasync] def removeNextDep(cell: Cell[K, V]): Unit
+  private[rasync] def removeCompleteDepentCell(cell: Cell[K, V]): Unit
+  private[rasync] def removeNextDepentCell(cell: Cell[K, V]): Unit
 }
 
 object CellCompleter {

@@ -110,15 +110,15 @@ private[rasync] abstract class CompleteDepRunnable[K <: Key[V], V](
         dependentCompleter.putFinal(v) // deps will be removed by putFinal()
       case NextOutcome(v) =>
         dependentCompleter.putNext(v)
-        dependentCompleter.removeDep(otherCell)
-        dependentCompleter.removeNextDep(otherCell)
+        dependentCompleter.removeCompleteDepentCell(otherCell)
+        dependentCompleter.removeNextDepentCell(otherCell)
       case NoOutcome =>
-        dependentCompleter.removeDep(otherCell)
-        dependentCompleter.removeNextDep(otherCell)
+        dependentCompleter.removeCompleteDepentCell(otherCell)
+        dependentCompleter.removeNextDepentCell(otherCell)
     }
   case Failure(_) =>
-    dependentCompleter.removeDep(otherCell)
-    dependentCompleter.removeNextDep(otherCell)
+    dependentCompleter.removeCompleteDepentCell(otherCell)
+    dependentCompleter.removeNextDepentCell(otherCell)
 }) with Dependency[K, V]
 
 /**
@@ -212,7 +212,7 @@ private[rasync] abstract class NextDepRunnable[K <: Key[V], V](
   // Remove the dependency, if `otherCell` is complete.
   // There is no need to removeCompleteDeps, because if those existed,
   // a CompleteDepRunnable would have been called and removed the dep
-  if (otherCell.isComplete) dependentCompleter.removeNextDep(otherCell)
+  if (otherCell.isComplete) dependentCompleter.removeNextDepentCell(otherCell)
 }) with Dependency[K, V]
 
 /**
