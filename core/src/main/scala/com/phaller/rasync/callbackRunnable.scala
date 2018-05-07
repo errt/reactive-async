@@ -20,7 +20,7 @@ private[rasync] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnC
   val otherCell: Cell[K, V]
 
   /** The callback to be called. It retrieves an updated value of otherCell and returns an Outcome for dependentCompleter. */
-  val callback: _ => Outcome[V]
+  val callback: Any // TODO Is there a better supertype for (a) (V, Bool)=>Outcome[V] and (b) V=>Outcome[V]
 
   /** Add this CallbackRunnable to its handler pool. */
   def execute(): Unit

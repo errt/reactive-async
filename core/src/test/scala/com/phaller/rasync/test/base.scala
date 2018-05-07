@@ -301,7 +301,7 @@ class BaseSuite extends FunSuite {
     completer1.cell.whenComplete(completer2.cell, (imm) => if (imm == Mutable) FinalOutcome(Mutable) else NoOutcome)
 
     completer1.putFinal(Immutable)
-    assert(completer2.cell.numCompleteCallbacks == 0)
+    assert(completer2.cell.numCompletDependentCells == 0)
     completer2.putFinal(Mutable)
 
     assert(completer1.cell.getResult() == Immutable)
@@ -319,7 +319,7 @@ class BaseSuite extends FunSuite {
     completer1.cell.whenCompleteSequential(completer2.cell, (imm) => if (imm == Mutable) FinalOutcome(Mutable) else NoOutcome)
 
     completer1.putFinal(Immutable)
-    assert(completer2.cell.numCompleteCallbacks == 0)
+    assert(completer2.cell.numCompletDependentCells == 0)
     completer2.putFinal(Mutable)
 
     assert(completer1.cell.getResult() == Immutable)
@@ -668,7 +668,7 @@ class BaseSuite extends FunSuite {
     })
 
     completer1.putFinal(Immutable)
-    assert(completer2.cell.numNextCallbacks == 0)
+    assert(completer2.cell.numNextDependentCells == 0)
     completer2.putNext(Mutable)
 
     assert(completer1.cell.getResult() == Immutable)
@@ -1148,8 +1148,8 @@ class BaseSuite extends FunSuite {
 
     assert(cell1.numNextDependencies == 1)
     assert(cell1.numTotalDependencies == 1)
-    assert(completer2.cell.numNextCallbacks == 1)
-    assert(completer2.cell.numCompleteCallbacks == 1)
+//    assert(completer2.cell.numNextCallbacks == 1)
+//    assert(completer2.cell.numCompleteCallbacks == 1)
 
     cell1.onNext {
       case Success(x) =>
@@ -1197,8 +1197,8 @@ class BaseSuite extends FunSuite {
 
     assert(cell1.numNextDependencies == 1)
     assert(cell1.numTotalDependencies == 1)
-    assert(completer2.cell.numNextCallbacks == 1)
-    assert(completer2.cell.numCompleteCallbacks == 1)
+    assert(completer2.cell.numNextDependentCells == 1)
+    assert(completer2.cell.numCompletDependentCells == 1)
 
     cell1.onNext {
       case Success(x) =>
@@ -1456,26 +1456,27 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("putNext: Failed, using ImmutabilityLattce") {
-    implicit val pool = new HandlerPool
-
-    val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-    val cell2 = completer2.cell
-
-    completer2.putFinal(Immutable)
-
-    // Should fail putNext with IllegalStateException because of adding new information
-    // to an already complete cell
-    try {
-      completer2.putNext(ConditionallyImmutable)
-      assert(false)
-    } catch {
-      case ise: IllegalStateException => assert(true)
-      case e: Exception => assert(false)
-    }
-
-    pool.onQuiescenceShutdown()
-  }
+//  test("putNext: Failed, using ImmutabilityLattce") {
+//  The tested behaviour is not wanted any more.
+//    implicit val pool = new HandlerPool
+//
+//    val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
+//    val cell2 = completer2.cell
+//
+//    completer2.putFinal(Immutable)
+//
+//    // Should fail putNext with IllegalStateException because of adding new information
+//    // to an already complete cell
+//    try {
+//      completer2.putNext(ConditionallyImmutable)
+//      assert(false)
+//    } catch {
+//      case ise: IllegalStateException => assert(true)
+//      case e: Exception => assert(false)
+//    }
+//
+//    pool.onQuiescenceShutdown()
+//  }
 
   test("putNext: concurrency test") {
     implicit val pool = new HandlerPool
