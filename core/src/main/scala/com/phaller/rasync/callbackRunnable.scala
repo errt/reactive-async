@@ -6,7 +6,7 @@ import lattice.Key
 
 import scala.concurrent.OnCompleteRunnable
 import scala.util.control.NonFatal
-import scala.util.{Failure, Success, Try}
+import scala.util.{ Failure, Success, Try }
 
 /**
  * Run a callback in a handler pool, if a value in a cell changes.
@@ -365,14 +365,13 @@ private[rasync] abstract class CombinedDepRunnable[K <: Key[V], V](
           dependentCompleter.removeNextDep(otherCell)
           dependentCompleter.removeCombinedDep(otherCell)
       }
-    }
-    else {
+    } else {
       // Copied from NextDepRunnable
       t match {
-        case Success(_) =>
-          val isComplete = otherCell.isComplete
-          val value = otherCell.getResult()
-          valueCallback(value, isComplete) match {
+        case Success(x) =>
+          //val isComplete = otherCell.isComplete
+          //val value = otherCell.getResult()
+          valueCallback(x, isFinal) match {
             case NextOutcome(v) =>
               dependentCompleter.putNext(v)
             case FinalOutcome(v) =>
