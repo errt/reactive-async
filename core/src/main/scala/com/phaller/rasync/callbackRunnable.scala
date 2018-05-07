@@ -20,7 +20,7 @@ private[rasync] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnC
   val otherCell: Cell[K, V]
 
   /** The callback to be called. It retrieves an updated value of otherCell and returns an Outcome for dependentCompleter. */
-  val valueCallback: V => Outcome[V]
+  val callback: _ => Outcome[V]
 
   /** Add this CallbackRunnable to its handler pool. */
   def execute(): Unit
@@ -66,19 +66,19 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   override val pool: HandlerPool,
   override val dependentCompleter: CellCompleter[K, V], // needed to not call whenNext callback, if whenComplete callback exists.
   override val otherCell: Cell[K, V],
-  val callback: V => Outcome[V])
+  override val callback: V => Outcome[V])
   extends CallbackRunnable[K, V] {
 
   // must be filled in before running it
   var started: Boolean = false
 
   def run(): Unit = {
-//    require(!started) // can't complete it twice
+//    require(!started) // can't complete it twice TODO Check this!
     started = true
 
     otherCell.getStagedValueFor(dependentCompleter.cell) match {
       case FinalOutcome(x) =>
-        valueCallback(x) match {
+        callback(x) match {
           case FinalOutcome(v) =>
             dependentCompleter.putFinal(v) // callbacks will be removed by putFinal()
           case NextOutcome(v) =>
@@ -92,13 +92,13 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   }
 }
 
-private[rasync] class CompleteConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val valueCallback: V => Outcome[V])
-  extends CompleteCallbackRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with ConcurrentCallbackRunnable[K, V]
+private[rasync] class CompleteConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val callback: V => Outcome[V])
+  extends CompleteCallbackRunnable[K, V](pool, dependentCompleter, otherCell, callback) with ConcurrentCallbackRunnable[K, V]
 
-private[rasync] class CompleteSequentialCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val valueCallback: V => Outcome[V])
-  extends CompleteCallbackRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with SequentialCallbackRunnable[K, V]
+private[rasync] class CompleteSequentialCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val callback: V => Outcome[V])
+  extends CompleteCallbackRunnable[K, V](pool, dependentCompleter, otherCell, callback) with SequentialCallbackRunnable[K, V]
 
- /* To be run when `otherCell` gets a final update.
+ /* To be run when `otherCell` gets an update.
  * @param pool          The handler pool that runs the callback function
  * @param dependentCompleter The cell, that depends on `otherCell`.
  * @param otherCell     Cell that triggers this callback.
@@ -108,13 +108,13 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
   override val pool: HandlerPool,
   override val dependentCompleter: CellCompleter[K, V], // needed to not call whenNext callback, if whenComplete callback exists.
   override val otherCell: Cell[K, V],
-  val callback: V => Outcome[V])
+  override val callback: V => Outcome[V])
   extends CallbackRunnable[K, V] {
 
   def run(): Unit = {
     otherCell.getStagedValueFor(dependentCompleter.cell) match {
       case Outcome(x, isFinal) =>
-        valueCallback(x) match {
+        callback(x) match {
           case NextOutcome (v) =>
             dependentCompleter.putNext (v)
           case FinalOutcome (v) =>
@@ -126,8 +126,43 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
   }
 }
 
-private[rasync] class NextConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val valueCallback: V => Outcome[V])
-  extends NextCallbackRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with ConcurrentCallbackRunnable[K, V]
+private[rasync] class NextConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val callback: V => Outcome[V])
+  extends NextCallbackRunnable[K, V](pool, dependentCompleter, otherCell, callback) with ConcurrentCallbackRunnable[K, V]
 
-private[rasync] class NextSequentialCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val valueCallback: V => Outcome[V])
-  extends NextCallbackRunnable[K, V](pool, dependentCompleter, otherCell, valueCallback) with SequentialCallbackRunnable[K, V]
+private[rasync] class NextSequentialCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val callback: V => Outcome[V])
+  extends NextCallbackRunnable[K, V](pool, dependentCompleter, otherCell, callback) with SequentialCallbackRunnable[K, V]
+
+
+/* To be run when `otherCell` gets an update.
+* @param pool          The handler pool that runs the callback function
+* @param dependentCompleter The cell, that depends on `otherCell`.
+* @param otherCell     Cell that triggers this callback.
+* @param callback      Callback function that is triggered on an onNext event
+*/
+private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
+    override val pool: HandlerPool,
+    override val dependentCompleter: CellCompleter[K, V], // needed to not call whenNext callback, if whenComplete callback exists.
+    override val otherCell: Cell[K, V],
+    override val callback: (V, Boolean) => Outcome[V])
+  extends CallbackRunnable[K, V] {
+
+  def run(): Unit = {
+    otherCell.getStagedValueFor(dependentCompleter.cell) match {
+      case Outcome(x, isFinal) =>
+        callback(x, isFinal) match {
+          case NextOutcome (v) =>
+            dependentCompleter.putNext (v)
+          case FinalOutcome (v) =>
+            dependentCompleter.putFinal (v)
+          case _ => /* do nothing, the value of */
+        }
+        if (isFinal) dependentCompleter.cell.removeAllCallbacks(otherCell)
+    }
+  }
+}
+
+private[rasync] class CombinedConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val callback: (V, Boolean) => Outcome[V])
+  extends CombinedCallbackRunnable[K, V](pool, dependentCompleter, otherCell, callback) with ConcurrentCallbackRunnable[K, V]
+
+private[rasync] class CombinedSequentialCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCell: Cell[K, V], override val callback: (V, Boolean) => Outcome[V])
+  extends CombinedCallbackRunnable[K, V](pool, dependentCompleter, otherCell, callback) with SequentialCallbackRunnable[K, V]
