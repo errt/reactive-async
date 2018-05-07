@@ -333,7 +333,7 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
    * @param callback The callback that should be run sequentially to all other sequential callbacks for the dependent cell.
    */
   private[rasync] def scheduleSequentialCallback[K <: Key[V], V](callback: SequentialCallbackRunnable[K, V]): Unit = {
-    val dependentCell = callback.dependentCell
+    val dependentCell = callback.dependentCompleter.cell
     var success = false
     var startCallback = false
     while (!success) {
