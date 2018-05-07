@@ -1,13 +1,12 @@
 package com.phaller.rasync
 
-import java.util.concurrent.ForkJoinPool
+import java.util.concurrent.{ CountDownLatch, ForkJoinPool }
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.{ Await, Future, Promise }
 import scala.concurrent.duration._
-
 import lattice.{ DefaultKey, Key, Updater }
 import org.opalj.graphs._
 
@@ -27,6 +26,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
   private val poolState = new AtomicReference[PoolState](new PoolState)
 
   private val cellsNotDone = new AtomicReference[Map[Cell[_, _], Queue[SequentialCallbackRunnable[_, _]]]](Map()) // use `values` to store all pending sequential triggers
+
+  private var interruptLatch = new CountDownLatch(1)
+  @volatile private var isInterrupted = false
 
   /**
    * Returns a new cell in this HandlerPool.
@@ -315,6 +317,9 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
     pool.execute(new Runnable {
       def run(): Unit = {
         try {
+          if (isInterrupted) {
+            interruptLatch.await()
+          }
           task.run()
         } catch {
           case NonFatal(e) =>
@@ -444,4 +449,20 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   def reportFailure(t: Throwable): Unit =
     t.printStackTrace()
+
+  /**
+   * Interrupt the computation of cells. It can be resumed using the `resume` method.
+   */
+  def interrupt(): Unit = {
+    isInterrupted = true
+  }
+
+  /**
+   * Resume the computation if the execution was interrupted. Don't do anything if the execution was not interrupted.
+   */
+  def resume(): Unit = {
+    isInterrupted = false
+    interruptLatch.countDown()
+    interruptLatch = new CountDownLatch(1)
+  }
 }
