@@ -765,30 +765,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       callback(Success(getResult()))
   }
 
-  /**
-   * Tries to add the callback, if already completed, it dispatches the callback to be executed.
-   *  Used by `onComplete()` to add callbacks to a promise and by `link()` to transfer callbacks
-   *  to the root promise when linking two promises together.
-   */
-  @tailrec
-  private def triggerOrAddCompleteDependentCell(dependentCell: Cell[K, V]): Unit = state.get() match {
-    case pre: FinalState[K, V] =>
-      // depdentCell can update its deps immediately, but
-      // we need to stage a value first. (Otherwise, it would
-      // receive a NoOutcome via getStagedValueFor(dependentCell))
-      val current = pre.asInstanceOf[FinalState[K, V]]
-      val newState = new FinalState(current.res, dependentCell :: current.dependentCells)
-      if (!state.compareAndSet(pre, newState))
-        triggerOrAddCompleteDependentCell(dependentCell)
-      else
-        dependentCell.updateDeps()
-    case pre: IntermediateState[_, _] =>
-      // assemble new state
-      val current = pre.asInstanceOf[IntermediateState[K, V]]
-      val newState = new IntermediateState(current.res, current.tasksActive, dependentCell :: current.completeDependentCells, current.completeCallbacks, current.dependentCells, current.nextCallbacks, current.combinedCallbacks)
-      if (!state.compareAndSet(pre, newState))
-        triggerOrAddCompleteDependentCell(dependentCell)
-  }
 
   private[rasync] def getStagedValueFor(dependentCell: Cell[K, V]): Outcome[V] = state.get() match {
     case pre: FinalState[K, V] =>
@@ -856,6 +832,32 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   }
 
+
+  /**
+    * Tries to add the callback, if already completed, it dispatches the callback to be executed.
+    *  Used by `onComplete()` to add callbacks to a promise and by `link()` to transfer callbacks
+    *  to the root promise when linking two promises together.
+    */
+  @tailrec
+  private def triggerOrAddCompleteDependentCell(dependentCell: Cell[K, V]): Unit = state.get() match {
+    case pre: FinalState[K, V] =>
+      // depdentCell can update its deps immediately, but
+      // we need to stage a value first. (Otherwise, it would
+      // receive a NoOutcome via getStagedValueFor(dependentCell))
+      val current = pre.asInstanceOf[FinalState[K, V]]
+      val newState = new FinalState(current.res, dependentCell :: current.dependentCells)
+      if (!state.compareAndSet(pre, newState))
+        triggerOrAddCompleteDependentCell(dependentCell)
+      else
+        dependentCell.updateDeps()
+    case pre: IntermediateState[_, _] =>
+      // assemble new state
+      val current = pre.asInstanceOf[IntermediateState[K, V]]
+      val newState = new IntermediateState(current.res, current.tasksActive, dependentCell :: current.completeDependentCells, current.completeCallbacks, current.dependentCells, current.nextCallbacks, current.combinedCallbacks)
+      if (!state.compareAndSet(pre, newState))
+        triggerOrAddCompleteDependentCell(dependentCell)
+  }
+
   /**
    * Tries to add the callback, if already completed, it dispatches the callback to be executed.
    *  Used by `onNext()` to add callbacks to a promise and by `link()` to transfer callbacks
@@ -872,7 +874,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val newDepCells = current.dependentCells.filterNot(_ == dependentCell)
         val newState = new FinalState(pre.res, newDepCells)
         if (!state.compareAndSet(pre, newState))
-          triggerOrAddCompleteDependentCell(dependentCell)
+          triggerOrAddNextDependentCell(dependentCell)
         else
           dependentCell.updateDeps()
       case pre: IntermediateState[_, _] =>

@@ -473,46 +473,54 @@ class BaseSuite extends FunSuite {
   }
 
   test("whenNext: dependency 2") {
-    val latch = new CountDownLatch(2)
+    // TODO ! blinker?
+//    for (i <- 1 to 100)
+    {
+//      println(s"starting round $i")
+      val latch = new CountDownLatch(2)
 
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
+      implicit val pool = new HandlerPool
+      val completer1 = CellCompleter[StringIntKey, Int]("somekey")
+      val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
 
-    val cell1 = completer1.cell
-    cell1.whenNext(completer2.cell, (x: Int) => {
-      if (x == 10) NextOutcome(20)
-      else NoOutcome
-    })
-    cell1.whenComplete(completer2.cell, x => {
-      if (x == 10) FinalOutcome(20) else NoOutcome
-    })
+      val cell1 = completer1.cell
+      cell1.whenNext(completer2.cell, x => {
+        if (x == 10) NextOutcome(20)
+        else NoOutcome
+      })
+      cell1.whenComplete(completer2.cell, x => {
+        if (x == 10) FinalOutcome(20)
+        else NoOutcome
+      })
 
-    assert(cell1.numNextDependencies == 1)
+      assert(cell1.numNextDependencies == 1)
 
-    cell1.onComplete {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
+      cell1.onComplete {
+        case Success(x) =>
+          println("on complete called")
+          assert(x === 20)
+          latch.countDown()
+        case Failure(e) =>
+          assert(false)
+          latch.countDown()
+      }
+      cell1.onNext {
+        case Success(x) =>
+          println("on next called")
+          assert(x === 20)
+          latch.countDown()
+        case Failure(e) =>
+          assert(false)
+          latch.countDown()
+      }
+
+      completer2.putFinal(10)
+      latch.await()
+
+      assert(cell1.numNextDependencies == 0)
+
+      pool.onQuiescenceShutdown()
     }
-    cell1.onNext {
-      case Success(x) =>
-        assert(x === 20)
-        latch.countDown()
-      case Failure(e) =>
-        assert(false)
-        latch.countDown()
-    }
-
-    completer2.putFinal(10)
-    latch.await()
-
-    assert(cell1.numNextDependencies == 0)
-
-    pool.onQuiescenceShutdown()
   }
 
   test("whenNextSequential: dependency 2") {
@@ -527,7 +535,7 @@ class BaseSuite extends FunSuite {
       if (x == 10) NextOutcome(20)
       else NoOutcome
     })
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.whenCompleteSequential(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
 
     assert(cell1.numNextDependencies == 1)
 
