@@ -199,7 +199,7 @@ private object IntermediateState {
 
 private class FinalState[K <: Key[V], V] (
      val res: Try[V],
-     val dependentCells: Set[Cell[K, V]])
+     val dependentCells: List[Cell[K, V]])
   extends State[V]
 
 private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
@@ -550,7 +550,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       case current: IntermediateState[_, _] =>
         val currentState = current.asInstanceOf[IntermediateState[K, V]]
         val newVal = tryJoin(currentState.res, v.get)
-        val newDependentCells = currentState.dependentCells.keySet ++ currentState.completeDependentCells // TODO Can we merge nextDependentCells and completeDependentCells? I guess so, but maybe tests need to be adapted.
+        val newDependentCells = currentState.dependentCells.keys.toList ++ currentState.completeDependentCells // TODO Can we merge nextDependentCells and completeDependentCells? I guess so, but maybe tests need to be adapted.
         val newState = new FinalState(Success(newVal), newDependentCells)
         if (state.compareAndSet(current, newState))
           (currentState, newState)
@@ -772,9 +772,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    */
   @tailrec
   private def triggerOrAddCompleteDependentCell(dependentCell: Cell[K, V]): Unit = state.get() match {
-    case r: FinalState[K, V] =>
-      dependentCell.updateDeps()
-    // case _: DefaultPromise[_] => compressedRoot().triggerOrAddCompleteDependentCell(runnable)
+    case pre: FinalState[K, V] =>
+      // depdentCell can update its deps immediately, but
+      // we need to stage a value first. (Otherwise, it would
+      // receive a NoOutcome via getStagedValueFor(dependentCell))
+      val current = pre.asInstanceOf[FinalState[K, V]]
+      val newState = new FinalState(current.res, dependentCell :: current.dependentCells)
+      if (!state.compareAndSet(pre, newState))
+        triggerOrAddCompleteDependentCell(dependentCell)
+      else
+        dependentCell.updateDeps()
     case pre: IntermediateState[_, _] =>
       // assemble new state
       val current = pre.asInstanceOf[IntermediateState[K, V]]
@@ -789,10 +796,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       val current = pre.asInstanceOf[FinalState[K, V]]
 
         if (current.dependentCells.contains(dependentCell)) {
-          /* Return v but clear staging before. */
+          /* Return v but clear staging before. This avoids repeated invocations of the same callback later. */
 
-          // NoOutcome signals, that the staged value has been pulled.
-          val newNextDependentCells = current.dependentCells - dependentCell
+          val newNextDependentCells = current.dependentCells.filterNot(_ == dependentCell)
           val newState = new FinalState(current.res, newNextDependentCells)
           if (!state.compareAndSet(current, newState)) getStagedValueFor(dependentCell) // try again
           else FinalOutcome(current.res.get)
@@ -858,9 +864,17 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   @tailrec
   private def triggerOrAddNextDependentCell(dependentCell: Cell[K, V]): Unit =
     state.get() match {
-      case r: FinalState[K, V] =>
-        dependentCell.updateDeps()
-      // case _: DefaultPromise[_] => compressedRoot().triggerOrAddCompleteDependentCell(runnable)
+      case pre: FinalState[K, V] =>
+        // depdentCell can update its deps immediately, but
+        // we need to stage a value first. (Otherwise, it would
+        // receive a NoOutcome via getStagedValueFor(dependentCell))
+        val current = pre.asInstanceOf[FinalState[K, V]]
+        val newDepCells = current.dependentCells.filterNot(_ == dependentCell)
+        val newState = new FinalState(pre.res, newDepCells)
+        if (!state.compareAndSet(pre, newState))
+          triggerOrAddCompleteDependentCell(dependentCell)
+        else
+          dependentCell.updateDeps()
       case pre: IntermediateState[_, _] =>
         // assemble new state
         val current = pre.asInstanceOf[IntermediateState[K, V]]
