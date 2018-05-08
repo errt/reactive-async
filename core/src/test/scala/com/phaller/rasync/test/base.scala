@@ -2295,97 +2295,101 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenNextSequential: state") {
-    val n = 1000
-    var count = 0
-
-    val runningCallbacks = new AtomicInteger(0)
-    val latch = new CountDownLatch(1)
-    val random = new scala.util.Random()
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-    val cell1 = completer1.cell
-    cell1.whenNextSequential(completer2.cell, (x: Int) => {
-      assert(runningCallbacks.incrementAndGet() == 1)
-      count += 1
-      Thread.`yield`()
-      try {
-        Thread.sleep(random.nextInt(3))
-      } catch {
-        case _: InterruptedException => /* ignore */
-      }
-      assert(runningCallbacks.decrementAndGet() == 0)
-      Outcome(count, count == n)
-    })
-
-    cell1.onComplete(_ => {
-      latch.countDown()
-    })
-
-    for (i <- 1 to n)
-      pool.execute(() => completer2.putNext(i))
-
-    latch.await()
-
-    assert(cell1.getResult() == n)
-
-    pool.onQuiescenceShutdown()
-  }
-
-  test("whenCompleteSequential: state") {
-    val n = 1000
-    var count = 0
-
-    val runningCallbacks = new AtomicInteger(0)
-    val latch = new CountDownLatch(1)
-    var otherLatches: Set[CountDownLatch] = Set.empty
-    val random = new scala.util.Random()
-
-    implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
-    val cell1 = completer1.cell
-
-    for (i <- 1 to n) {
-      val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
-
-      val latch2 = new CountDownLatch(1)
-      otherLatches = otherLatches + latch2
-
-      completer2.cell.onComplete(_ => {
-        latch2.countDown()
-      })
-
-      cell1.whenNextSequential(completer2.cell, (x: Int) => {
-        assert(runningCallbacks.incrementAndGet() == 1)
-        count += 1
-        Thread.`yield`()
-        try {
-          Thread.sleep(random.nextInt(3))
-        } catch {
-          case _: InterruptedException => /* ignore */
-        }
-        assert(runningCallbacks.decrementAndGet() == 0)
-        Outcome(count, count == n)
-      })
-
-      cell1.onComplete(_ => {
-        latch.countDown()
-      })
-
-      pool.execute(() => completer2.putFinal(i))
-
-    }
-
-    latch.await()
-    otherLatches.foreach(_.await())
-
-    assert(cell1.getResult() == n)
-
-    pool.onQuiescenceShutdown()
-  }
+// TODO I need to think of a better way to test working with a state.
+//  As is, the tests checks, if n steps are taken, but this is
+//  not true any more, as the dependentCell might pull, after
+//  the staged values potentially have been updated several times.
+//  test("whenNextSequential: state") {
+//    val n = 1000
+//    var count = 0
+//
+//    val runningCallbacks = new AtomicInteger(0)
+//    val latch = new CountDownLatch(1)
+//    val random = new scala.util.Random()
+//
+//    implicit val pool = new HandlerPool
+//    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
+//    val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
+//
+//    val cell1 = completer1.cell
+//    cell1.whenNextSequential(completer2.cell, (x: Int) => {
+//      assert(runningCallbacks.incrementAndGet() == 1)
+//      count += 1
+//      Thread.`yield`()
+//      try {
+//        Thread.sleep(random.nextInt(3))
+//      } catch {
+//        case _: InterruptedException => /* ignore */
+//      }
+//      assert(runningCallbacks.decrementAndGet() == 0)
+//      Outcome(count, count == n)
+//    })
+//
+//    cell1.onComplete(_ => {
+//      latch.countDown()
+//    })
+//
+//    for (i <- 1 to n)
+//      pool.execute(() => completer2.putNext(i))
+//
+//    latch.await()
+//
+//    assert(cell1.getResult() == n)
+//
+//    pool.onQuiescenceShutdown()
+//  }
+//
+//  test("whenCompleteSequential: state") {
+//    val n = 1000
+//    var count = 0
+//
+//    val runningCallbacks = new AtomicInteger(0)
+//    val latch = new CountDownLatch(1)
+//    var otherLatches: Set[CountDownLatch] = Set.empty
+//    val random = new scala.util.Random()
+//
+//    implicit val pool = new HandlerPool
+//    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
+//    val cell1 = completer1.cell
+//
+//    for (i <- 1 to n) {
+//      val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
+//
+//      val latch2 = new CountDownLatch(1)
+//      otherLatches = otherLatches + latch2
+//
+//      completer2.cell.onComplete(_ => {
+//        latch2.countDown()
+//      })
+//
+//      cell1.whenNextSequential(completer2.cell, (x: Int) => {
+//        assert(runningCallbacks.incrementAndGet() == 1)
+//        count += 1
+//        Thread.`yield`()
+//        try {
+//          Thread.sleep(random.nextInt(3))
+//        } catch {
+//          case _: InterruptedException => /* ignore */
+//        }
+//        assert(runningCallbacks.decrementAndGet() == 0)
+//        Outcome(count, count == n)
+//      })
+//
+//      cell1.onComplete(_ => {
+//        latch.countDown()
+//      })
+//
+//      pool.execute(() => completer2.putFinal(i))
+//
+//    }
+//
+//    latch.await()
+//    otherLatches.foreach(_.await())
+//
+//    assert(cell1.getResult() == n)
+//
+//    pool.onQuiescenceShutdown()
+//  }
 
   test("whenComplete: called at most once") {
     implicit val intMaxLattice: Lattice[Int] = new Lattice[Int] {

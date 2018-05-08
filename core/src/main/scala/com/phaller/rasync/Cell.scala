@@ -783,14 +783,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       // An alternative implementation was
       // (1) to return "NoOutcome" here, but that would require the value passed to the callback runnable to be fixed, which could lead to more steps in the dependent cell
       // (2) store the staging even after the cell is completed.
-      // Note that in the current implementation, no NoSuchElementException can be thrown as opposed to the non-final State[_, _].
       FinalOutcome(r.asInstanceOf[Try[V]].get)
     case pre: State[_, _] =>
       // assemble new state
       val current = pre.asInstanceOf[State[K, V]]
       try
         current.nextDependentCells(dependentCell) match {
-          case NoOutcome => NoOutcome /* just return that no new value is available. Own state does not need to be changed. */
           case v @ Outcome(_) =>
             /* Return v but clear staging before. */
 
@@ -799,11 +797,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             val newState = new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDependentCells, current.nextCallbacks, current.combinedCallbacks)
             if (!state.compareAndSet(current, newState)) getStagedValueFor(dependentCell) // try again
             else v
-
+          case NoOutcome => NoOutcome /* just return that no new value is available. Own state does not need to be changed. */
         }
       catch {
         case _: NoSuchElementException =>
-          throw new NoSuchElementException(s"$dependentCell asked for a value of $this but was not registered as dependent cell.")
+          if (current.res != updater.bottom)
+            NextOutcome(current.res)
+          else NoOutcome
       }
   }
 
@@ -817,14 +817,18 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       // (2) store the staging even after the cell is completed.
       FinalOutcome(r.asInstanceOf[Try[V]].get)
     case pre: State[_, _] =>
+      val current = pre.asInstanceOf[State[K, V]]
       try {
-        val current = pre.asInstanceOf[State[K, V]]
         val result = current.nextDependentCells(dependentCell)
-        result // TODO Is this always a NextOutcome or NoOutcome? Would a FinalOutcome be OK?
+        // TODO Is this always a NextOutcome or NoOutcome? Would a FinalOutcome be OK?
+        result
       } catch {
         case _: NoSuchElementException =>
-          throw new NoSuchElementException(s"$dependentCell asked for a value of $this but was not registered as dependent cell.")
+          if (current.res != updater.bottom)
+            NextOutcome(current.res)
+          else NoOutcome
       }
+
   }
 
   /**

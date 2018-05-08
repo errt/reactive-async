@@ -75,8 +75,9 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   def run(): Unit = {
 //    require(!started) // can't complete it twice TODO Check this!
     started = true
-
-    otherCell.getStagedValueFor(dependentCompleter.cell) match {
+    val v = otherCell.getStagedValueFor(dependentCompleter.cell)
+    println(s"$otherCell -> $v")
+    v match {
       case FinalOutcome(x) =>
         callback(x) match {
           case FinalOutcome(v) =>
