@@ -484,7 +484,9 @@ class BaseSuite extends FunSuite {
       if (x == 10) NextOutcome(20)
       else NoOutcome
     })
-    cell1.whenComplete(completer2.cell, x => if (x == 10) FinalOutcome(20) else NoOutcome)
+    cell1.whenComplete(completer2.cell, x => {
+      if (x == 10) FinalOutcome(20) else NoOutcome
+    })
 
     assert(cell1.numNextDependencies == 1)
 

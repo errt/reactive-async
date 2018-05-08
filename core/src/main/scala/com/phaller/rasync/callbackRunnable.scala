@@ -36,7 +36,7 @@ private[rasync] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnC
 private[rasync] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
   /** Add this CallbackRunnable to its handler pool such that it is run concurrently. */
   def execute(): Unit =
-    if (otherCell.hasStagedValueFor(dependentCompleter.cell) != NoOutcome)
+    if (otherCell.hasStagedValueFor(dependentCompleter.cell) != NoOutcome) // TODO For COMPLETECallbackRunnables, one could use != FinalOutcome
       try pool.execute(this)
       catch { case NonFatal(t) => pool reportFailure t }
 }
@@ -76,7 +76,6 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
 //    require(!started) // can't complete it twice TODO Check this!
     started = true
     val v = otherCell.getStagedValueFor(dependentCompleter.cell)
-    println(s"$otherCell -> $v")
     v match {
       case FinalOutcome(x) =>
         callback(x) match {
