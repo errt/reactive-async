@@ -110,7 +110,7 @@ trait Cell[K <: Key[V], V] {
 
   private[rasync] def removeDependentCell(dependentCell: Cell[K, V]): Unit
 
-  private[rasync] def resolveWithValue(value: V): Unit
+  private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[K, V]]): Unit
   def completeCellDependencies: Seq[Cell[K, V]]
   def totalCellDependencies: Seq[Cell[K, V]]
   def isIndependent(): Boolean
@@ -150,7 +150,7 @@ object Cell {
           case Success(x) =>
             completer.putFinal(List(x))
           case f @ Failure(_) =>
-            completer.tryComplete(f.asInstanceOf[Failure[List[V]]])
+            completer.tryComplete(f.asInstanceOf[Failure[List[V]]], None)
         }
       case c :: cs =>
         val fst = in.head
@@ -161,10 +161,10 @@ object Cell {
               case Success(xs) =>
                 completer.putFinal(x :: xs)
               case f @ Failure(_) =>
-                completer.tryComplete(f)
+                completer.tryComplete(f, None)
             }
           case f @ Failure(_) =>
-            completer.tryComplete(f.asInstanceOf[Failure[List[V]]])
+            completer.tryComplete(f.asInstanceOf[Failure[List[V]]], None)
         }
     }
     completer.cell
@@ -240,7 +240,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override def putFinal(x: V): Unit = {
-    val res = tryComplete(Success(x))
+    val res = tryComplete(Success(x), None)
     if (!res)
       throw new IllegalStateException("Cell already completed.")
   }
@@ -266,10 +266,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case Success(y) =>
             completer.putFinal((x, y))
           case f @ Failure(_) =>
-            completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+            completer.tryComplete(f.asInstanceOf[Try[(V, V)]], None)
         }
       case f @ Failure(_) =>
-        completer.tryComplete(f.asInstanceOf[Try[(V, V)]])
+        completer.tryComplete(f.asInstanceOf[Try[(V, V)]], None)
     }
     completer.cell
   }
@@ -316,7 +316,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         Seq[Cell[K, V]]()
       case pre: State[_, _] => // not completed
         val current = pre.asInstanceOf[State[K, V]]
-        (current.completeCallbacks.keys ++ current.nextCallbacks.keys).toSeq
+        (current.completeCallbacks.keys ++ current.nextCallbacks.keys ++ current.combinedCallbacks.keys).toSeq
     }
   }
 
@@ -350,8 +350,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override private[rasync] def resolveWithValue(value: V): Unit = {
-    this.putFinal(value)
+  override private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[K, V]]): Unit = {
+    val res = tryComplete(Success(value), Some(dontCall))
+    if (!res)
+      throw new IllegalStateException("Cell already completed.")
   }
 
   override def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
@@ -551,7 +553,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override def tryComplete(value: Try[V]): Boolean = {
+  override def tryComplete(value: Try[V], dontCall: Option[Seq[Cell[K, V]]]): Boolean = {
     val resolved: Try[V] = resolveTry(value)
 
     // the only call to `tryCompleteAndGetState`
@@ -559,12 +561,19 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       case _: Try[_] => // was already complete
         true // As decided by phaller,  we ignore all updates after freeze and do not throw exceptions
 
-      case (pre: State[K, V], _) =>
-        pre.completeDependentCells.foreach(_.updateDeps())
-        pre.nextDependentCells.foreach(_._1.updateDeps())
+      case (pre: State[K, V], finalValue: Try[V]) =>
 
-        onCompleteHandler.foreach(_.apply(value))
-        onNextHandler.foreach(_.apply(value))
+        dontCall match {
+          case Some(cells) =>
+            pre.nextDependentCells.foreach(c => if (!cells.contains(c._1)) c._1.updateDeps())
+            pre.completeDependentCells.foreach(c => if (!cells.contains(c)) c.updateDeps())
+          case None =>
+            pre.nextDependentCells.foreach(_._1.updateDeps())
+            pre.completeDependentCells.foreach(_.updateDeps())
+        }
+
+        onCompleteHandler.foreach(_.apply(finalValue))
+        onNextHandler.foreach(_.apply(finalValue))
 
         // others do not need to pull our values any more.
         val others = pre.completeCallbacks.keys ++ pre.nextCallbacks.keys ++ pre.combinedCallbacks.keys
@@ -743,9 +752,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   // Schedules execution of `callback` when completed with final result.
   override def onComplete[U](callback: Function[Try[V], U]): Unit = state.get() match {
     case _: State[_, _] =>
-      if (getResult() != updater.bottom) callback(Success(getResult()))
       onCompleteHandler =  callback :: onCompleteHandler
-    case _ => callback(Success(getResult()))
+    case _ =>
+      callback(Success(getResult()))
   }
 
   /**
@@ -838,7 +847,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val newState = new State(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells + (dependentCell -> staged), current.nextCallbacks, current.combinedCallbacks)
         if (!state.compareAndSet(pre, newState))
           triggerOrAddNextDependentCell(dependentCell)
-        else if (staged != NoOutcome) dependentCell.updateDeps()
+        else
+          if (staged != NoOutcome) dependentCell.updateDeps()
     }
 
   // copied from object `impl.Promise`

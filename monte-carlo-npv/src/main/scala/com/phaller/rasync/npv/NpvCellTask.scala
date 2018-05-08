@@ -81,7 +81,7 @@ class NpvCellTask(p: CellCompleter[DefaultKey[StatsCollector], StatsCollector], 
           }
           p.putFinal(collector)
         case f @ Failure(_) =>
-          p.tryComplete(f.asInstanceOf[Failure[StatsCollector]])
+          p.tryComplete(f.asInstanceOf[Failure[StatsCollector]], None)
       }
     }
   }

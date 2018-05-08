@@ -122,6 +122,7 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
           case _ => /* do nothing, the value of */
         }
         if (isFinal) dependentCompleter.cell.removeAllCallbacks(otherCell)
+      case NoOutcome => /* No new value is present. */
     }
   }
 }

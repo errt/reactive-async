@@ -245,14 +245,15 @@ class HandlerPool(parallelism: Int = 8, unhandledExceptionHandler: Throwable => 
 
   /** Resolve all cells with the associated value. */
   private def resolve[K <: Key[V], V](results: Seq[(Cell[K, V], V)]): Unit = {
+    val cells = results.map(_._1)
     for ((c, v) <- results)
       execute(new Runnable {
         override def run(): Unit = {
           // Remove all callbacks that target other cells of this set.
           // The result of those cells is explicitely given in `results`.
-          c.removeAllCallbacks(results.map(_._1))
+//          c.removeAllCallbacks(cells)
           // we can now safely put a final value
-          c.resolveWithValue(v)
+          c.resolveWithValue(v, cells)
         }
       })
   }

@@ -20,7 +20,7 @@ trait CellCompleter[K <: Key[V], V] {
   def put(x: V, isFinal: Boolean): Unit
 
   private[rasync] def tryNewState(value: V): Boolean
-  def tryComplete(value: Try[V]): Boolean
+  def tryComplete(value: Try[V], dontCall: Option[Seq[Cell[K, V]]]): Boolean
 
   private[rasync] def removeCompleteDepentCell(cell: Cell[K, V]): Unit
   private[rasync] def removeNextDepentCell(cell: Cell[K, V]): Unit
