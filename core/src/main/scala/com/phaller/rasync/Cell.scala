@@ -115,7 +115,7 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[K, V]]): Unit
   def completeCellDependencies: Seq[Cell[K, V]]
   def totalCellDependencies: Seq[Cell[K, V]]
-  def isIndependent(): Boolean
+  private[rasync] def isIndependent(): Boolean
 
   def removeCompleteCallbacks(cell: Cell[K, V]): Unit
   def removeNextCallbacks(cell: Cell[K, V]): Unit
@@ -330,7 +330,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override def isIndependent(): Boolean = {
+  override private[rasync] def isIndependent(): Boolean = {
     state.get() match {
       case finalRes: FinalState[K, V] => // completed with final result
         true
