@@ -141,7 +141,7 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
           case _ => /* do nothing, the value of */
         }
         if (isFinal) dependentCompleter.cell.removeAllCallbacks(otherCell)
-      case NoOutcome => /* No new value is present. */
+      case _ => /* No new value is present. */
     }
   }
 }
@@ -180,7 +180,7 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
   def run(): Unit = {
     otherCell.dequeueFor(dependentCompleter.cell, completeDep) match {
       case Outcome(x, isFinal) =>
-        callback(x, isFinal) match {
+        callCallback(x, isFinal) match {
           case NextOutcome(v) =>
             dependentCompleter.putNext(v)
           case FinalOutcome(v) =>
@@ -188,6 +188,7 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
           case _ => /* do nothing, the value of */
         }
         if (isFinal) dependentCompleter.cell.removeAllCallbacks(otherCell)
+      case _ => /* No new value is present. */
     }
   }
 }
