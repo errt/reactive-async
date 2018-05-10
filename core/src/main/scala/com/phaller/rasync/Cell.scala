@@ -124,7 +124,7 @@ trait Cell[K <: Key[V], V] {
     * Use removeDependentCell to remove the dependency on the other side.
     */
   private[rasync] def removeAllCallbacks(cell: Cell[K, V]): Unit
-  private[rasync] def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit
+  private[rasync] def removeAllCallbacks(cells: Iterable[Cell[K, V]]): Unit
 
   private[rasync] def updateDeps(): Unit
 
@@ -699,7 +699,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   @tailrec
-  override private[rasync] final def removeAllCallbacks(cells: Seq[Cell[K, V]]): Unit = {
+  override private[rasync] final def removeAllCallbacks(cells: Iterable[Cell[K, V]]): Unit = {
     state.get() match {
       case pre: IntermediateState[_, _] =>
         val current = pre.asInstanceOf[IntermediateState[K, V]]
