@@ -4,7 +4,6 @@ package lattice
 trait Updater[V] {
   val initial: V
   def update(current: V, next: V): V
-  def ignoreIfFinal(): Boolean = false // TODO Remove this. IgnoreIfFinal === true !
 }
 
 class AggregationUpdater[V](val lattice: Lattice[V]) extends Updater[V] {

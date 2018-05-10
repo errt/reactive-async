@@ -26,9 +26,5 @@ class StringIntUpdater extends Updater[Int] {
     else v1
 
   override val initial: Int = 0
-
-  // This updater needs to ignore inputs on final cells,
-  // because its update method is not based on an ordering
-  override val ignoreIfFinal = true
 }
 
