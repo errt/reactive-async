@@ -20,14 +20,18 @@ private[rasync] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnC
   val otherCell: Cell[K, V]
 
   protected val completeDep: Boolean
+  protected val sequential: Boolean
 
   /** The callback to be called. It retrieves an updated value of otherCell and returns an Outcome for dependentCompleter. */
-  val callback: Any // TODO Is there a better supertype for (a) (V, Bool)=>Outcome[V] and (b) V=>Outcome[V]
+  val callback: Any // TODO Is there a better supertype for (a) (V, Bool)=>Outcome[V] and (b) V=>Outcome[V]. Nothing=>Outcome[V] does not work.
 
   /** Add this CallbackRunnable to its handler pool. */
-  def execute(): Unit
+  def execute(): Unit =
+    if (otherCell.peakFor(dependentCompleter.cell, completeDep) != NoOutcome) // TODO For COMPLETECallbackRunnables, one could use != FinalOutcome
+      try pool.execute(this)
+      catch { case NonFatal(t) => pool reportFailure t }
 
-  /** Essentially, call the callback. */
+  /** Call the callback and use its result in dependentCompleter. */
   override def run(): Unit
 }
 
@@ -36,11 +40,7 @@ private[rasync] trait CallbackRunnable[K <: Key[V], V] extends Runnable with OnC
  * Call execute() to add the callback to the given HandlerPool.
  */
 private[rasync] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
-  /** Add this CallbackRunnable to its handler pool such that it is run concurrently. */
-  def execute(): Unit =
-    if (otherCell.peakFor(dependentCompleter.cell, completeDep) != NoOutcome) // TODO For COMPLETECallbackRunnables, one could use != FinalOutcome
-      try pool.execute(this)
-      catch { case NonFatal(t) => pool reportFailure t }
+  override protected final val sequential: Boolean = false
 }
 
 /**
@@ -48,13 +48,7 @@ private[rasync] trait ConcurrentCallbackRunnable[K <: Key[V], V] extends Callbac
  * Call execute() to add the callback to the given HandlerPool.
  */
 private[rasync] trait SequentialCallbackRunnable[K <: Key[V], V] extends CallbackRunnable[K, V] {
-  /**
-   * Add this CallbackRunnable to its handler pool such that it is run sequentially.
-   * All SequentialCallbackRunnables with the same `dependentCell` are executed sequentially.
-   */
-  def execute(): Unit =
-    if (otherCell.peakFor(dependentCompleter.cell, completeDep) != NoOutcome)
-      pool.scheduleSequentialCallback(this)
+  override protected final val sequential: Boolean = true
 }
 
 /**
@@ -75,13 +69,23 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   // must be filled in before running it
   var started: Boolean = false
 
+  protected def callCallback(x: V): Outcome[V] = {
+    if (sequential) {
+      dependentCompleter.synchronized {
+        callback(x)
+      }
+    } else {
+      callback(x)
+    }
+  }
+
   def run(): Unit = {
 //    require(!started) // can't complete it twice TODO Check this!
     started = true
     val v = otherCell.dequeueFor(dependentCompleter.cell, completeDep)
     v match {
       case FinalOutcome(x) =>
-        callback(x) match {
+        callCallback(x) match {
           case FinalOutcome(v) =>
             dependentCompleter.putFinal(v) // callbacks will be removed by putFinal()
           case NextOutcome(v) =>
@@ -116,10 +120,21 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
 
    override protected final val completeDep = false
 
-  def run(): Unit = {
+   protected def callCallback(x: V): Outcome[V] = {
+     if (sequential) {
+       dependentCompleter.synchronized {
+         callback(x)
+       }
+     } else {
+       callback(x)
+     }
+   }
+
+
+   def run(): Unit = {
     otherCell.dequeueFor(dependentCompleter.cell, completeDep) match {
       case Outcome(x, isFinal) =>
-        callback(x) match {
+        callCallback(x) match {
           case NextOutcome (v) =>
             dependentCompleter.putNext (v)
           case FinalOutcome (v) =>
@@ -153,6 +168,16 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
   extends CallbackRunnable[K, V] {
 
   override protected final val completeDep = false
+
+  protected def callCallback(x: V, isFinal: Boolean): Outcome[V] = {
+    if (sequential) {
+      dependentCompleter.synchronized {
+        callback(x, isFinal)
+      }
+    } else {
+      callback(x, isFinal)
+    }
+  }
 
   def run(): Unit = {
     otherCell.dequeueFor(dependentCompleter.cell, completeDep) match {
