@@ -796,7 +796,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       else {
         val current = pre.asInstanceOf[IntermediateState[K, V]]
 
-        current.nextDependentCells(dependentCell) match {
+        current.nextDependentCells.getOrElse(dependentCell, None) match {
           case Some(v) =>
             /* Return v but clear staging before. */
 
