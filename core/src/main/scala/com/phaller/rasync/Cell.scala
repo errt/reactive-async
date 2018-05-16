@@ -134,6 +134,7 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def peakFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
 
   def isADependee(): Boolean
+  def removeDependency(dependentCell: Cell[K, V]): Unit
 }
 
 object Cell {
@@ -684,8 +685,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val current = pre.asInstanceOf[IntermediateState[K, V]]
         val newNextCallbacks = current.nextCallbacks - cell
         val newCompleteCallbacks = current.completeCallbacks - cell
+        val newCombinedCallbacks = current.combinedCallbacks - cell
 
-        val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, newCompleteCallbacks, current.nextDependentCells, newNextCallbacks, current.combinedCallbacks)
+        val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, newCompleteCallbacks, current.nextDependentCells, newNextCallbacks, newCombinedCallbacks)
         if (!state.compareAndSet(current, newState))
           removeAllCallbacks(cell)
         else {
@@ -703,8 +705,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val current = pre.asInstanceOf[IntermediateState[K, V]]
         val newNextCallbacks = current.nextCallbacks -- cells
         val newCompleteCallbacks = current.completeCallbacks -- cells
+        val newCombinedCallbacks = current.combinedCallbacks -- cells
 
-        val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, newCompleteCallbacks, current.nextDependentCells, newNextCallbacks, current.combinedCallbacks)
+        val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, newCompleteCallbacks, current.nextDependentCells, newNextCallbacks, newCombinedCallbacks)
         if (!state.compareAndSet(current, newState))
           removeAllCallbacks(cells)
         else {
@@ -925,4 +928,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     numCompletDependentCells > 0 || numNextDependentCells > 0
   }
 
+  override def removeDependency(dependentCell: Cell[K, V]): Unit = {
+    removeAllCallbacks(dependentCell)
+    dependentCell.removeDependentCell(this)
+  }
 }
