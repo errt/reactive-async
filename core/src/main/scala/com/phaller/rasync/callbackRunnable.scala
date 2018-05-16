@@ -167,20 +167,20 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
 
   override protected final val completeDep = false
 
-  protected def callCallback(x: V, isFinal: Boolean): Outcome[V] = {
+  protected def run(x: V, isFinal: Boolean): Unit = {
     if (sequential) {
-      dependentCompleter.synchronized {
-        callback(x, isFinal)
+      dependentCompleter.cell.synchronized {
+        callCallback()
       }
     } else {
-      callback(x, isFinal)
+      callCallback()
     }
   }
 
-  def run(): Unit = {
+  protected def callCallback(): Unit = {
     otherCell.dequeueFor(dependentCompleter.cell, completeDep) match {
       case Outcome(x, isFinal) =>
-        callCallback(x, isFinal) match {
+        callback(x, isFinal) match {
           case NextOutcome(v) =>
             dependentCompleter.putNext(v)
           case FinalOutcome(v) =>
