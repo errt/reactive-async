@@ -1,13 +1,15 @@
 package com.phaller.rasync
 
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{ CountDownLatch, ExecutionException }
+import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, ExecutionException }
 
-import com.phaller.rasync.lattice.{ Key, NotMonotonicException, DefaultKey, Updater, PartialOrderingWithBottom }
+import com.phaller.rasync.lattice.{ DefaultKey, Key, NotMonotonicException, PartialOrderingWithBottom, Updater }
 
 import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try }
 import lattice.{ DefaultKey, Key, PartialOrderingWithBottom, Updater }
+
+import scala.collection.concurrent.TrieMap
 
 trait Cell[K <: Key[V], V] {
   private[rasync] val completer: CellCompleter[K, V]
@@ -131,7 +133,7 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def updateDeps(): Unit
 
   private[rasync] def dequeueFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
-  private[rasync] def peakFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
+  private[rasync] def peekFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
 
   def isADependee(): Boolean
   def removeDependency(dependentCell: Cell[K, V]): Unit
@@ -189,6 +191,7 @@ private class State[V]
 private class IntermediateState[K <: Key[V], V](
   val res: V,
   val tasksActive: Boolean,
+  // TODO can those be TrieMaps too? -> remove the need of CAS
   val completeDependentCells: List[Cell[K, V]],
   val completeCallbacks: Map[Cell[K, V], CompleteCallbackRunnable[K, V]],
   val nextDependentCells: Map[Cell[K, V], Option[V]],
@@ -202,8 +205,8 @@ private object IntermediateState {
 
 private class FinalState[K <: Key[V], V](
   val res: Try[V],
-  val completeDependentCells: List[Cell[K, V]],
-  val nextDependentCells: List[Cell[K, V]])
+  val completeDependentCells: TrieMap[Cell[K, V], Any],
+  val nextDependentCells: TrieMap[Cell[K, V], Any])
   extends State[V]
 
 private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
@@ -554,7 +557,15 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       case current: IntermediateState[_, _] =>
         val currentState = current.asInstanceOf[IntermediateState[K, V]]
         val newVal = tryJoin(currentState.res, v.get)
-        val newState = new FinalState(Success(newVal), currentState.completeDependentCells, currentState.nextDependentCells.keys.toList)
+        val newCompleteDependentCells: TrieMap[Cell[K, V], Any] = new TrieMap()
+        val newNextDependentCells: TrieMap[Cell[K, V], Any] = new TrieMap()
+        currentState.completeDependentCells.foreach(c => newCompleteDependentCells.put(c, 0))
+        currentState.nextDependentCells.foreach(c => newNextDependentCells.put(c._1, 0))
+
+        val newState = new FinalState[K, V](
+          Success(newVal),
+          newCompleteDependentCells,
+          newNextDependentCells) // TODO performance .toList might be slow
         if (state.compareAndSet(current, newState))
           (currentState, newState)
         else
@@ -573,22 +584,20 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         true // As decided by phaller,  we ignore all updates after freeze and do not throw exceptions
 
       case (pre: IntermediateState[K, V], finalValue: FinalState[K, V]) =>
+        val others = pre.nextDependentCells.keys ++ pre.completeDependentCells
 
         dontCall match {
           case Some(cells) =>
-            pre.nextDependentCells.foreach(c => if (!cells.contains(c._1)) c._1.updateDeps())
-            pre.completeDependentCells.foreach(c => if (!cells.contains(c)) c.updateDeps())
+            others.foreach(c => if (!cells.contains(c)) c.updateDeps())
           case None =>
-            pre.nextDependentCells.foreach(_._1.updateDeps())
-            pre.completeDependentCells.foreach(_.updateDeps())
+            others.foreach(_.updateDeps())
         }
 
         onCompleteHandler.foreach(_.apply(finalValue.res))
         onNextHandler.foreach(_.apply(finalValue.res))
 
         // others do not need to pull our values any more.
-        val others = pre.completeCallbacks.keys ++ pre.nextCallbacks.keys ++ pre.combinedCallbacks.keys
-        others.foreach(_.removeDependentCell(this))
+        //others.foreach(_.removeAllCallbacks(this))
 
         true
     }
@@ -776,20 +785,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         if (current.completeDependentCells.contains(dependentCell)) {
           /* Return v but clear staging before. This avoids repeated invocations of the same callback later. */
 
-          val newCompleteDependentCells = current.completeDependentCells.filterNot(_ == dependentCell)
-          val newState = new FinalState(current.res, newCompleteDependentCells, current.nextDependentCells)
-          if (!state.compareAndSet(current, newState)) dequeueFor(dependentCell, completeDep) // try again
-          else FinalOutcome(current.res.get)
+          current.completeDependentCells.remove(dependentCell)
+          FinalOutcome(current.res.get)
         } else NoOutcome
 
       } else {
         if (current.nextDependentCells.contains(dependentCell)) {
           /* Return v but clear staging before. This avoids repeated invocations of the same callback later. */
 
-          val newNextDependentCells = current.nextDependentCells.filterNot(_ == dependentCell)
-          val newState = new FinalState(current.res, current.completeDependentCells, newNextDependentCells)
-          if (!state.compareAndSet(current, newState)) dequeueFor(dependentCell, completeDep) // try again
-          else FinalOutcome(current.res.get)
+          current.nextDependentCells.remove(dependentCell)
+          FinalOutcome(current.res.get)
           // TODO Maybe we need to pass a NextOutcome here to not have repeated invocations with isFinal==true. Then also see hasStagedValue().
         } else NoOutcome
       }
@@ -813,7 +818,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       }
   }
 
-  private[rasync] def peakFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V] = state.get() match {
+  private[rasync] def peekFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V] = state.get() match {
     case pre: FinalState[K, V] =>
       val current = pre.asInstanceOf[FinalState[K, V]]
 
@@ -848,11 +853,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       // we need to stage a value first. (Otherwise, it would
       // receive a NoOutcome via getStagedValueFor(dependentCell))
       val current = pre.asInstanceOf[FinalState[K, V]]
-      val newState = new FinalState(current.res, dependentCell :: current.completeDependentCells, current.nextDependentCells)
-      if (!state.compareAndSet(pre, newState))
-        triggerOrAddCompleteDependentCell(dependentCell)
-      else
-        dependentCell.updateDeps()
+      current.completeDependentCells.put(dependentCell, 0)
+      dependentCell.updateDeps()
+
     case pre: IntermediateState[_, _] =>
       // assemble new state
       val current = pre.asInstanceOf[IntermediateState[K, V]]
@@ -874,11 +877,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         // we need to stage a value first. (Otherwise, it would
         // receive a NoOutcome via getStagedValueFor(dependentCell))
         val current = pre.asInstanceOf[FinalState[K, V]]
-        val newState = new FinalState(pre.res, current.completeDependentCells, dependentCell :: current.nextDependentCells)
-        if (!state.compareAndSet(pre, newState))
-          triggerOrAddNextDependentCell(dependentCell)
-        else
-          dependentCell.updateDeps()
+        current.nextDependentCells.put(dependentCell, 0)
+        dependentCell.updateDeps()
       case pre: IntermediateState[_, _] =>
         // assemble new state
         val current = pre.asInstanceOf[IntermediateState[K, V]]
@@ -909,12 +909,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   override private[rasync] def updateDeps(): Unit = state.get() match {
     case _: IntermediateState[_, _] =>
       // eventually check on all cells that we depend on for new values
-      pool.execute(() => state.get() match {
-        case state: IntermediateState[_, _] =>
-          state.completeCallbacks.foreach { _._2.execute() }
-          state.nextCallbacks.foreach { _._2.execute() }
-          state.combinedCallbacks.foreach { _._2.execute() }
-        case _: FinalState[K, V] => /* We are final already, so we ignore all incoming information. */
+      pool.execute(() => {
+        pool.updateDepsCount.incrementAndGet()
+        state.get() match {
+          case state: IntermediateState[_, _] =>
+            state.completeCallbacks.foreach { _._2.run() }
+            state.nextCallbacks.foreach { _._2.run() }
+            state.combinedCallbacks.foreach { _._2.run() }
+          case _: FinalState[K, V] =>
+          /* We are final already, so we ignore all incoming information. */
+        }
       })
     case _: FinalState[K, V] => /* We are final already, so we ignore all incoming information. */
   }

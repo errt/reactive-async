@@ -1,7 +1,7 @@
 package com.phaller.rasync
 
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, ForkJoinPool }
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicLong, AtomicReference }
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
@@ -9,6 +9,7 @@ import scala.concurrent.{ Await, Future, Promise }
 import scala.concurrent.duration._
 import lattice.{ DefaultKey, Key, Updater }
 import org.opalj.graphs._
+
 import scala.collection.JavaConverters._
 import scala.collection.immutable.Queue
 
@@ -29,6 +30,9 @@ class HandlerPool(val parallelism: Int = 8, unhandledExceptionHandler: Throwable
 
   private var interruptLatch = new CountDownLatch(1)
   @volatile private var isInterrupted = false
+
+  def remainingTasks(): Int = poolState.get.submittedTasks
+  val updateDepsCount: AtomicLong = new AtomicLong(0)
 
   /**
    * Returns a new cell in this HandlerPool.
