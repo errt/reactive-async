@@ -130,7 +130,7 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def removeAllCallbacks(cell: Cell[K, V]): Unit
   private[rasync] def removeAllCallbacks(cells: Iterable[Cell[K, V]]): Unit
 
-  private[rasync] def updateDeps(): Unit
+  private[rasync] def updateDeps(removeCellAfter: Option[Cell[K, V]] = None): Unit
 
   private[rasync] def dequeueFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
   private[rasync] def peekFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
@@ -588,9 +588,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
         dontCall match {
           case Some(cells) =>
-            others.foreach(c => if (!cells.contains(c)) c.updateDeps())
+            others.foreach(c => if (!cells.contains(c)) c.updateDeps(Some(this)))
           case None =>
-            others.foreach(_.updateDeps())
+            others.foreach(_.updateDeps(Some(this)))
         }
 
         onCompleteHandler.foreach(_.apply(finalValue.res))
@@ -906,7 +906,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     case t => Failure(t)
   }
 
-  override private[rasync] def updateDeps(): Unit = state.get() match {
+  override private[rasync] def updateDeps(removeCellAfter: Option[Cell[K, V]] = None): Unit = state.get() match {
     case _: IntermediateState[_, _] =>
       // eventually check on all cells that we depend on for new values
       pool.execute(() => {
@@ -919,6 +919,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case _: FinalState[K, V] =>
           /* We are final already, so we ignore all incoming information. */
         }
+        removeCellAfter foreach removeAllCallbacks
       })
     case _: FinalState[K, V] => /* We are final already, so we ignore all incoming information. */
   }
