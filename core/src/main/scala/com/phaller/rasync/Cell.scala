@@ -593,11 +593,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             others.foreach(_.updateDeps(Some(this)))
         }
 
+        pre.combinedCallbacks.keys.foreach(_.removeDependentCell(this))
+        pre.nextCallbacks.keys.foreach(_.removeDependentCell(this))
+        pre.completeCallbacks.keys.foreach(_.removeDependentCell(this))
+
         onCompleteHandler.foreach(_.apply(finalValue.res))
         onNextHandler.foreach(_.apply(finalValue.res))
-
-        // others do not need to pull our values any more.
-        //others.foreach(_.removeAllCallbacks(this))
 
         true
     }
