@@ -171,7 +171,7 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
 
   def run(): Unit = {
     if (sequential) {
-      dependentCompleter.cell.synchronized {
+      dependentCompleter.synchronized {
         callCallback()
       }
     } else {

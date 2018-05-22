@@ -615,6 +615,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       if (!state.compareAndSet(current, newState))
         removeDependentCell(dependentCell)
 
+    case pre: FinalState[K, V] =>
+      // assemble new state
+      val current = pre.asInstanceOf[FinalState[K, V]]
+      current.nextDependentCells.remove(dependentCell)
+      current.completeDependentCells.remove(dependentCell)
+
     case _ => /* do nothing */
 
   }
