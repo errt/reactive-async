@@ -80,7 +80,6 @@ trait Cell[K <: Key[V], V] {
    */
   def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
   def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
-  def whenSequential(other: Iterable[Cell[K, V]], valueCallback: (V, Boolean) => Outcome[V]): Unit // TODO Add this API for related methods (complete/next/seq/non-seq)
 
   def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
 
@@ -235,6 +234,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   // `CellCompleter` and corresponding `Cell` are the same run-time object.
   override def cell: Cell[K, V] = this
 
+  override def sequential[T](f: => T): T = this.synchronized(f)
+
   override def getResult(): V = state.get() match {
     case finalRes: FinalState[K, V] =>
       finalRes.res match {
@@ -378,14 +379,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     this.when(other, valueCallback, sequential = true)
   }
 
-  override def whenSequential(other: Iterable[Cell[K, V]], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
-    // TODO Improve performace by only synch on other.addCombiedDepCell(this) and create only one new state with all callbacks included at once.
-    this.synchronized {
-      other.foreach {
-        this.when(_, valueCallback, sequential = true)
-      }
-    }
-  }
 
   private def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V], sequential: Boolean): Unit = {
     var success = false

@@ -72,7 +72,7 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   protected def callCallback(x: V): Outcome[V] = {
     // TODO fix synchronized
     if (sequential) {
-      dependentCompleter.synchronized {
+      dependentCompleter.sequential {
         callback(x)
       }
     } else {
@@ -122,9 +122,8 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
   override protected final val completeDep = false
 
   protected def callCallback(x: V): Outcome[V] = {
-    // TODO fix synchronized
     if (sequential) {
-      dependentCompleter.synchronized {
+      dependentCompleter.sequential {
         callback(x)
       }
     } else {
@@ -171,7 +170,7 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
 
   def run(): Unit = {
     if (sequential) {
-      dependentCompleter.synchronized {
+      dependentCompleter.sequential {
         callCallback()
       }
     } else {

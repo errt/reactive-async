@@ -24,6 +24,8 @@ trait CellCompleter[K <: Key[V], V] {
 
   private[rasync] def removeCompleteDepentCell(cell: Cell[K, V]): Unit
   private[rasync] def removeNextDepentCell(cell: Cell[K, V]): Unit
+
+  def sequential[T](f: => T): T
 }
 
 object CellCompleter {
