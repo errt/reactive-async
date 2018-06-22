@@ -12,6 +12,7 @@ import org.opalj.graphs._
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.Queue
+import scala.util.{ Failure, Success, Try }
 
 /* Need to have reference equality for CAS.
  */
@@ -250,28 +251,45 @@ class HandlerPool(
   /**
    * Resolves a cycle of unfinished cells via the key's `resolve` method.
    */
-  private def resolveCycle[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit =
-    resolve(cells.head.key.resolve(cells))
+  private def resolveCycle[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit = {
+    val r = cells.head.key.resolve _
+    resolve(cells, r.asInstanceOf[Iterable[Cell[K, V]] => Iterable[(Cell[K, V], V)]])
+  }
 
   /**
    * Resolves a cell with default value with the key's `fallback` method.
    */
-  private def resolveDefault[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit =
-    resolve(cells.head.key.fallback(cells))
+  private def resolveDefault[K <: Key[V], V](cells: Iterable[Cell[K, V]]): Unit = {
+    val f = cells.head.key.fallback _
+    resolve(cells, f.asInstanceOf[Iterable[Cell[K, V]] => Iterable[(Cell[K, V], V)]])
+  }
 
   /** Resolve all cells with the associated value. */
-  private def resolve[K <: Key[V], V](results: Iterable[(Cell[K, V], V)]): Unit = {
-    val cells = results.map(_._1).toSeq
-    for ((c, v) <- results)
-      execute(new Runnable {
-        override def run(): Unit = {
-          // Remove all callbacks that target other cells of this set.
-          // The result of those cells is explicitely given in `results`.
-          //          c.removeAllCallbacks(cells)
-          // we can now safely put a final value
-          c.resolveWithValue(v, cells)
-        }
-      })
+  private def resolve[K <: Key[V], V](cells: Iterable[Cell[K, V]], keyMethod: Iterable[Cell[K, V]] => Iterable[(Cell[K, V], V)]): Unit = {
+    try {
+      val results = keyMethod.apply(cells)
+      val resolvedCells = results.map(_._1).toSeq
+      for ((c, v) <- results)
+        execute(new Runnable {
+          override def run(): Unit = {
+            // Remove all callbacks that target other cells of this set.
+            // The result of those cells is explicitely given in `results`.
+            //          c.removeAllCallbacks(cells)
+            // we can now safely put a final value
+            c.resolveWithValue(Success(v), resolvedCells)
+          }
+        })
+    } catch {
+      case e: Exception =>
+        val resolvedCells = cells.toSeq
+        for (c <- resolvedCells)
+          execute(new Runnable {
+            override def run(): Unit = {
+              c.resolveWithValue(Failure(e), resolvedCells)
+            }
+          })
+    }
+
   }
 
   /**
@@ -372,10 +390,14 @@ class HandlerPool(
       // if the cell's state has successfully been changed, schedule further computations
       execute(() => {
         val completer = cell.completer
-        val outcome = completer.init(cell) // call the init method
-        outcome match {
-          case Outcome(v, isFinal) => completer.put(v, isFinal)
-          case NoOutcome => /* don't do anything */
+        try {
+          val outcome = completer.init(cell) // call the init method
+          outcome match {
+            case Outcome(v, isFinal) => completer.put(v, isFinal)
+            case NoOutcome => /* don't do anything */
+          }
+        } catch {
+          case e: Exception => completer.putFailure(e)
         }
       })
   }

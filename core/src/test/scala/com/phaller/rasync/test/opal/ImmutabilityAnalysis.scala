@@ -7,15 +7,15 @@ import java.net.URL
 import org.opalj.fpcf._
 
 import scala.collection.JavaConverters._
-
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
-import org.opalj.br.{ Field, ClassFile, ObjectType }
+import org.opalj.br.{ ClassFile, Field, ObjectType }
 import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project, PropertyStoreKey }
 import org.opalj.br.analyses.TypeExtensibilityKey
 import org.opalj.fpcf.analyses.FieldMutabilityAnalysis
 import org.opalj.fpcf.properties.FieldMutability
+
+import scala.util.Success
 
 object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
 
@@ -259,12 +259,10 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
               project.classFile(f.fieldType.asObjectType) match {
                 case Some(classFile) =>
                   val fieldTypeCell = classFileToObjectTypeCellCompleter(classFile)._2.cell
-                  cellCompleter.cell.whenNext(
-                    fieldTypeCell,
-                    (fieldImm: Immutability) => fieldImm match {
-                      case Mutable | ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
-                      case Immutable => NoOutcome
-                    })
+                  cellCompleter.cell.whenNext(fieldTypeCell, {
+                    case Success(Mutable) | Success(ConditionallyImmutable) => NextOutcome(ConditionallyImmutable)
+                    case Success(Immutable) => NoOutcome
+                  })
                 case None => /* Do nothing */
               }
             }
@@ -277,13 +275,11 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
         map(superType => project.classFile(superType).get)
 
       directSuperClasses foreach { superClass =>
-        cellCompleter.cell.whenNext(
-          classFileToObjectTypeCellCompleter(superClass)._1.cell,
-          (imm: Immutability) => imm match {
-            case Immutable => NoOutcome
-            case Mutable => FinalOutcome(Mutable)
-            case ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
-          })
+        cellCompleter.cell.whenNext(classFileToObjectTypeCellCompleter(superClass)._1.cell, {
+          case Success(Immutable) => NoOutcome
+          case Success(Mutable) => FinalOutcome(Mutable)
+          case Success(ConditionallyImmutable) => NextOutcome(ConditionallyImmutable)
+        })
       }
     }
   }
@@ -309,13 +305,11 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
       // If this class file doesn't have subtypes, then the TypeImmutability is the same as
       // the ObjectImmutability
       if (cf.isFinal || directSubtypes.isEmpty) {
-        cellCompleter.cell.whenNext(
-          classFileToObjectTypeCellCompleter(cf)._1.cell,
-          _ match {
-            case Immutable => NoOutcome
-            case Mutable => FinalOutcome(Mutable)
-            case ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
-          })
+        cellCompleter.cell.whenNext(classFileToObjectTypeCellCompleter(cf)._1.cell, {
+          case Success(Immutable) => NoOutcome
+          case Success(Mutable) => FinalOutcome(Mutable)
+          case Success(ConditionallyImmutable) => NextOutcome(ConditionallyImmutable)
+        })
       } else {
         val unavailableSubtype = directSubtypes.find(t ⇒ project.classFile(t).isEmpty)
         if (unavailableSubtype.isDefined)
@@ -325,13 +319,11 @@ object ImmutabilityAnalysis extends DefaultOneStepAnalysis {
           // Check subclasses to determine TypeImmutability
           val directSubclasses = directSubtypes map { subtype ⇒ project.classFile(subtype).get }
           directSubclasses foreach { subclass =>
-            cellCompleter.cell.whenNext(
-              classFileToObjectTypeCellCompleter(subclass)._2.cell,
-              _ match {
-                case Immutable => NoOutcome
-                case Mutable => FinalOutcome(Mutable)
-                case ConditionallyImmutable => NextOutcome(ConditionallyImmutable)
-              })
+            cellCompleter.cell.whenNext(classFileToObjectTypeCellCompleter(subclass)._2.cell, {
+              case Success(Immutable) => NoOutcome
+              case Success(Mutable) => FinalOutcome(Mutable)
+              case Success(ConditionallyImmutable) => NextOutcome(ConditionallyImmutable)
+            })
           }
         }
       }

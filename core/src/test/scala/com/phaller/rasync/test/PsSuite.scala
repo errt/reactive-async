@@ -7,6 +7,7 @@ import org.scalatest.FunSuite
 
 import scala.concurrent.duration._
 import scala.concurrent.Await
+import scala.util.Success
 
 class PsSuite extends FunSuite {
 
@@ -46,19 +47,21 @@ class PsSuite extends FunSuite {
     val cell20 = completer20.cell
 
     completer2.putNext(1)
-    cell2.whenNext(cell1, x => {
-      if (x == 42) {
-        completer2.putFinal(43)
-      }
-      NoOutcome
+    cell2.whenNext(cell1, {
+      case Success(x) =>
+        if (x == 42) {
+          completer2.putFinal(43)
+        }
+        NoOutcome
     })
 
     completer20.putNext(1)
-    cell20.whenNextSequential(cell10, x => {
-      if (x == 10) {
-        completer20.putFinal(43)
-      }
-      NoOutcome
+    cell20.whenNextSequential(cell10, {
+      case Success(x) =>
+        if (x == 10) {
+          completer20.putFinal(43)
+        }
+        NoOutcome
     })
 
     completer1.putNext(10)
@@ -111,8 +114,9 @@ class PsSuite extends FunSuite {
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    cell2.whenNextSequential(cell1, v => {
-      NextOutcome(v)
+    cell2.whenNextSequential(cell1, {
+      case Success(v) =>
+        NextOutcome(v)
     })
 
     pool.interrupt()

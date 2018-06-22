@@ -15,12 +15,13 @@ trait Cell[K <: Key[V], V] {
   def key: K
 
   /**
-   * Returns the current value of `this` `Cell`.
+   * Returns the current value of `this` `Cell` or throws the stored exception.
    *
    * Note that this method may return non-deterministic values. To ensure
    * deterministic executions use the quiescence API of class `HandlerPool`.
    */
   def getResult(): V
+  def getResultTry(): Try[V]
 
   /**
    * Start computations associated with this cell.
@@ -45,8 +46,8 @@ trait Cell[K <: Key[V], V] {
    * @param other  Cell that `this` Cell depends on.
    * @param valueCallback  Callback that receives the final value of `other` and returns an `Outcome` for `this` cell.
    */
-  def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
-  def whenCompleteSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
+  def whenComplete(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit
+  def whenCompleteSequential(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit
 
   /**
    * Adds a dependency on some `other` cell.
@@ -62,8 +63,8 @@ trait Cell[K <: Key[V], V] {
    * @param other  Cell that `this` Cell depends on.
    * @param valueCallback  Callback that receives the new value of `other` and returns an `Outcome` for `this` cell.
    */
-  def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
-  def whenNextSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
+  def whenNext(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit
+  def whenNextSequential(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit
 
   /**
    * Adds a dependency on some `other` cell.
@@ -80,8 +81,8 @@ trait Cell[K <: Key[V], V] {
    * @param other  Cell that `this` Cell depends on.
    * @param valueCallback  Callback that receives the new value of `other` and returns an `Outcome` for `this` cell.
    */
-  def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
-  def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
+  def when(other: Cell[K, V], valueCallback: (Try[V], Boolean) => Outcome[V]): Unit
+  def whenSequential(other: Cell[K, V], valueCallback: (Try[V], Boolean) => Outcome[V]): Unit
 
   def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
 
@@ -131,7 +132,7 @@ trait Cell[K <: Key[V], V] {
    * @param value The value to put.
    * @param dontCall The cells that won't be informed about the update.
    */
-  private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[K, V]]): Unit
+  private[rasync] def resolveWithValue(value: Try[V], dontCall: Seq[Cell[K, V]]): Unit
   def completeCellDependencies: Seq[Cell[K, V]]
   def totalCellDependencies: Seq[Cell[K, V]]
   private[rasync] def isIndependent(): Boolean
@@ -172,8 +173,8 @@ trait Cell[K <: Key[V], V] {
    * @param completeDep true, iff the dependency has been established via `whenComplete`.
    * @return An Outcome to propagate to `dependentCell`.
    */
-  private[rasync] def pollFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
-  private[rasync] def peekFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V]
+  private[rasync] def pollFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[Try[V]]
+  private[rasync] def peekFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[Try[V]]
 
   /**
    * Returns true, iff other cells depend on `this` cell.
@@ -312,9 +313,17 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     case finalRes: FinalState[K, V] =>
       finalRes.res match {
         case Success(result) => result
-        case Failure(err) => throw new IllegalStateException(err)
+        case Failure(err) => throw err
       }
     case raw: IntermediateState[K, V] => raw.res
+  }
+
+  override def getResultTry(): Try[V] = state.get() match {
+    case finalRes: FinalState[K, V] =>
+      finalRes.res
+    case raw: IntermediateState[K, V] =>
+      // IntermediateStates never contain Failures, as those lead to completion
+      Success(raw.res)
   }
 
   override def trigger(): Unit = {
@@ -341,6 +350,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   override def put(x: V, isFinal: Boolean): Unit = {
     if (isFinal) putFinal(x)
     else putNext(x)
+  }
+
+  override private[rasync] def putFailure(e: Exception): Unit = {
+    val res = tryComplete(Failure(e), None)
+    if (!res)
+      throw new IllegalStateException("Cell already completed.")
   }
 
   def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)] = {
@@ -437,21 +452,21 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[K, V]]): Unit = {
-    val res = tryComplete(Success(value), Some(dontCall))
+  override private[rasync] def resolveWithValue(value: Try[V], dontCall: Seq[Cell[K, V]]): Unit = {
+    val res = tryComplete(value, Some(dontCall))
     if (!res)
       throw new IllegalStateException("Cell already completed.")
   }
 
-  override def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
+  override def when(other: Cell[K, V], valueCallback: (Try[V], Boolean) => Outcome[V]): Unit = {
     this.when(other, valueCallback, sequential = false)
   }
 
-  override def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
+  override def whenSequential(other: Cell[K, V], valueCallback: (Try[V], Boolean) => Outcome[V]): Unit = {
     this.when(other, valueCallback, sequential = true)
   }
 
-  private def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V], sequential: Boolean): Unit = {
+  private def when(other: Cell[K, V], valueCallback: (Try[V], Boolean) => Outcome[V], sequential: Boolean): Unit = {
     var success = false
     while (!success) { // repeat until compareAndSet succeeded (or the dependency is outdated)
       state.get() match {
@@ -484,15 +499,15 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
+  override def whenNext(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit = {
     this.whenNext(other, valueCallback, sequential = false)
   }
 
-  override def whenNextSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
+  override def whenNextSequential(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit = {
     this.whenNext(other, valueCallback, sequential = true)
   }
 
-  private def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean): Unit = {
+  private def whenNext(other: Cell[K, V], valueCallback: Try[V] => Outcome[V], sequential: Boolean): Unit = {
     var success = false
     while (!success) { // repeat until compareAndSet succeeded (or the dependency is outdated)
       state.get() match {
@@ -525,15 +540,15 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     }
   }
 
-  override def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
+  override def whenComplete(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit = {
     this.whenComplete(other, valueCallback, false)
   }
 
-  override def whenCompleteSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
+  override def whenCompleteSequential(other: Cell[K, V], valueCallback: Try[V] => Outcome[V]): Unit = {
     this.whenComplete(other, valueCallback, true)
   }
 
-  private def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean): Unit = {
+  private def whenComplete(other: Cell[K, V], valueCallback: Try[V] => Outcome[V], sequential: Boolean): Unit = {
     var success = false
     while (!success) {
       state.get() match {
@@ -584,8 +599,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    * with the new value by using the given updater and return the new value.
    * If 'current == v' then it will return 'v'.
    */
-  private def tryJoin(current: V, next: V): V = {
-    updater.update(current, next)
+  private def tryJoin(current: V, next: V): Try[V] = {
+    Try(updater.update(current, next))
   }
 
   /**
@@ -601,27 +616,33 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
       case raw: IntermediateState[_, _] => // not completed
         val current = raw.asInstanceOf[IntermediateState[K, V]]
-        val newVal = tryJoin(current.res, value)
-        if (current.res != newVal) {
+        tryJoin(current.res, value) match {
+          case Success(newVal) =>
+            // If tryJoin succeeded, we proceed to put this value into the cell
+            if (current.res != newVal) {
 
-          // create "staging" for dependent cells.
-          // To avoid multiple compareAndSets, this is not moved to a different method
-          val newNextDeps = current.nextDependentCells.map {
-            case (c, _) => (c, Some(newVal))
-          }
+              // create "staging" for dependent cells.
+              // To avoid multiple compareAndSets, this is not moved to a different method
+              val newNextDeps = current.nextDependentCells.map {
+                case (c, _) => (c, Some(newVal))
+              }
 
-          val newState = new IntermediateState(newVal, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDeps, current.nextCallbacks, current.combinedCallbacks)
+              val newState = new IntermediateState(newVal, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDeps, current.nextCallbacks, current.combinedCallbacks)
 
-          if (!state.compareAndSet(current, newState)) {
-            tryNewState(value)
-          } else {
-            // CAS was successful, so there was a point in time where `newVal` was in the cell
-            // every dependent cell should pull the new value
-            onNextHandler.foreach(_.apply(Success(newVal)))
-            current.nextDependentCells.foreach(_._1.updateDeps(this))
-            true
-          }
-        } else true
+              if (!state.compareAndSet(current, newState)) {
+                tryNewState(value)
+              } else {
+                // CAS was successful, so there was a point in time where `newVal` was in the cell
+                // every dependent cell should pull the new value
+                onNextHandler.foreach(_.apply(Success(newVal)))
+                current.nextDependentCells.foreach(_._1.updateDeps(this))
+                true
+              }
+            } else true
+          case f: Failure[_] =>
+            // If tryJoin failed (e.g. a NotMonotonicException) we can complete with the exception.
+            tryComplete(f.asInstanceOf[Failure[V]], None)
+        }
     }
   }
 
@@ -635,7 +656,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     state.get() match {
       case current: IntermediateState[_, _] =>
         val currentState = current.asInstanceOf[IntermediateState[K, V]]
-        val newVal = tryJoin(currentState.res, v.get)
+
+        val newVal = v match {
+          case Success(x) => tryJoin(currentState.res, x)
+          case f: Failure[_] => f.asInstanceOf[Failure[V]]
+        }
 
         // Copy completeDependentCells/nextDependentCells from IntermediateState to FinalState.
         val newCompleteDependentCells: TrieMap[Cell[K, V], Unit] = new TrieMap()
@@ -643,7 +668,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         currentState.completeDependentCells.foreach(c => newCompleteDependentCells.put(c, ()))
         currentState.nextDependentCells.foreach(c => newNextDependentCells.put(c._1, ()))
         val newState = new FinalState[K, V](
-          Success(newVal),
+          newVal,
           newCompleteDependentCells,
           newNextDependentCells)
 
@@ -888,7 +913,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       callback(Success(getResult()))
   }
 
-  private[rasync] def pollFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V] = state.get() match {
+  private[rasync] def pollFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[Try[V]] = state.get() match {
     case pre: FinalState[K, V] =>
       // assemble new state
       val current = pre.asInstanceOf[FinalState[K, V]]
@@ -898,7 +923,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           /* Return v but clear staging before. This avoids repeated invocations of the same callback later. */
 
           current.completeDependentCells.remove(dependentCell)
-          FinalOutcome(current.res.get)
+          FinalOutcome(current.res)
         } else {
           NoOutcome
         }
@@ -908,7 +933,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           /* Return v but clear staging before. This avoids repeated invocations of the same callback later. */
 
           current.nextDependentCells.remove(dependentCell)
-          FinalOutcome(current.res.get)
+          FinalOutcome(current.res)
         } else NoOutcome
       }
 
@@ -925,13 +950,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             val newNextDependentCells = current.nextDependentCells + (dependentCell -> None)
             val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDependentCells, current.nextCallbacks, current.combinedCallbacks)
             if (!state.compareAndSet(current, newState)) pollFor(dependentCell, completeDep) // try again
-            else NextOutcome(v)
+            else NextOutcome(Success(v)) // Intermediate results cannot be failures
           case None => NoOutcome /* just return that no new value is available. Own state does not need to be changed. */
         }
       }
   }
 
-  private[rasync] def peekFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[V] = state.get() match {
+  private[rasync] def peekFor(dependentCell: Cell[K, V], completeDep: Boolean): Outcome[Try[V]] = state.get() match {
     case pre: FinalState[K, V] =>
       val current = pre.asInstanceOf[FinalState[K, V]]
 
@@ -941,14 +966,14 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
       if (valueStaged)
         // Pass the staged value. See "to do" in getStagedValue
-        FinalOutcome(current.res.get)
+        FinalOutcome(current.res)
       else
         NoOutcome
 
     case pre: IntermediateState[_, _] =>
       val current = pre.asInstanceOf[IntermediateState[K, V]]
       val result = current.nextDependentCells.get(dependentCell).map({
-        case Some(v) => NextOutcome(v)
+        case Some(v) => NextOutcome(Success(v))
         case None => NoOutcome
       }).getOrElse(NoOutcome)
       result
