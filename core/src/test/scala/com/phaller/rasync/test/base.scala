@@ -2515,6 +2515,58 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
+  test("whenNextSequential: state shared with init") {
+    for (_ <- 1 to 100) {
+      // cell1 has deps to 1000 cells. All callbacks
+      // and the init function share a counter (i.e. state)
+      // that must not be incremented concurrently
+
+      implicit object IntSetLattice extends Lattice[Set[Int]] {
+        def join(left: Set[Int], right: Set[Int]): Set[Int] = left ++ right
+        val bottom: Set[Int] = Set[Int]()
+      }
+      val theKey = new DefaultKey[Set[Int]]
+
+      val n = 1000
+      var count = Set[Int]()
+      val latch = new CountDownLatch(1)
+
+      implicit val pool = new HandlerPool
+
+      def increment(): Outcome[Set[Int]] = {
+        val newCount = count + count.size
+        Thread.`yield`()
+        count = newCount
+        // if the counting is corrent, count.size will be increased to n+1 eventually, which
+        // leads to a final update
+        // we later check, if cell1 has been completed
+        Outcome(count, count.size == n + 1) // +1, because we have one increment in the init method
+      }
+
+      val cell1 = pool.mkCell[theKey.type, Set[Int]](theKey, c => {
+        for (i <- 1 to n) {
+          val completer2 = CellCompleter[theKey.type, Set[Int]](theKey)
+          // set up the dependency
+          c.whenNextSequential(completer2.cell, _ => increment)
+          // eventually trigger the dependency
+          pool.execute(() => completer2.putNext(Set(i)))
+        }
+        Thread.`yield`()
+        increment()
+      })
+      // If the counting is correct, cell1 gets completed we can release the latch.
+      cell1.onComplete(_ => latch.countDown())
+
+      cell1.trigger()
+
+      // wait for cell1 to be completed
+      latch.await()
+      assert(cell1.getResult().size == n + 1)
+
+      pool.onQuiescenceShutdown()
+    }
+  }
+
   test("whenNextSequential: discard callbacks on completion") {
     val latch1 = new CountDownLatch(1)
     val latch2 = new CountDownLatch(1)

@@ -372,7 +372,7 @@ class HandlerPool(
       // if the cell's state has successfully been changed, schedule further computations
       execute(() => {
         val completer = cell.completer
-        val outcome = completer.init(cell) // call the init method
+        val outcome = completer.sequential { completer.init(cell) } // call the init method
         outcome match {
           case Outcome(v, isFinal) => completer.put(v, isFinal)
           case NoOutcome => /* don't do anything */
