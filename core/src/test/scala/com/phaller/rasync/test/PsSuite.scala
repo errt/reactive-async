@@ -25,7 +25,7 @@ class PsSuite extends FunSuite {
     })
 
     var fut = pool.quiescentResolveCycles
-    Await.ready(fut, 2.seconds)
+    Await.ready(fut, 20.seconds)
 
     Thread.sleep(200)
 
@@ -68,7 +68,7 @@ class PsSuite extends FunSuite {
     })
 
     var fut = pool.quiescentResolveCycles
-    Await.ready(fut, 2.seconds)
+    Await.ready(fut, 20.seconds)
 
     Thread.sleep(200)
 

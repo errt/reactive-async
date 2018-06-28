@@ -96,6 +96,8 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
         return ;
       }
 
+      // stop further propagation until this callback has been completed
+      dependentCompleter.cell.incIncomingCallbacks()
       // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
       otherCell.pollFor(dependentCompleter.cell, completeDep) match {
         case FinalOutcome(x) =>
@@ -112,6 +114,9 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
           }
         case _ => /* This is a whenCompleteDependency. Ignore any non-final values of otherCell. */
       }
+      // Indicate, that callbacks have been run.
+      // If the counter drops to zero, inform depdent cells.
+      dependentCompleter.cell.decIncomingCallbacks()
     }
   }
 }
@@ -154,6 +159,8 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
       return ;
     }
 
+    // stop further propagation until this callback has been completed
+    dependentCompleter.cell.incIncomingCallbacks()
     // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
     otherCell.pollFor(dependentCompleter.cell, completeDep) match {
       case Outcome(x, isFinal) =>
@@ -170,6 +177,9 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
         if (isFinal) dependentCompleter.cell.removeNextCallbacks(otherCell)
       case _ => /* No new value is present. */
     }
+    // Indicate, that callbacks have been run.
+    // If the counter drops to zero, inform depdent cells.
+    dependentCompleter.cell.decIncomingCallbacks()
   }
 }
 
@@ -209,6 +219,8 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
       return ;
     }
 
+    // stop further propagation until this callback has been completed
+    dependentCompleter.cell.incIncomingCallbacks()
     // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
     otherCell.pollFor(dependentCompleter.cell, completeDep) match {
       case Outcome(x, isFinal) =>
@@ -224,6 +236,9 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
         if (isFinal) dependentCompleter.cell.removeCombinedCallbacks(otherCell)
       case _ => /* No new value is present. */
     }
+    // Indicate, that callbacks have been run.
+    // If the counter drops to zero, inform depdent cells.
+    dependentCompleter.cell.decIncomingCallbacks()
   }
 }
 

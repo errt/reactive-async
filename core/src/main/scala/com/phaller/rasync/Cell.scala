@@ -1,6 +1,6 @@
 package com.phaller.rasync
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import java.util.concurrent.{ CountDownLatch, ExecutionException }
 
 import scala.annotation.tailrec
@@ -122,6 +122,9 @@ trait Cell[K <: Key[V], V] {
   private[rasync] def addCombinedDependentCell(dependentCell: Cell[K, V]): Unit
 
   private[rasync] def removeDependentCell(dependentCell: Cell[K, V]): Unit
+
+  private[rasync] def incIncomingCallbacks(): Unit
+  private[rasync] def decIncomingCallbacks(): Unit
 
   /**
    * Put a final value to `this` cell, but do not propagate to some cells.
@@ -295,6 +298,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
    * (b) `IntermediateState[K,V]`   for an incomplete state.
    */
   private val state = new AtomicReference[State[V]](IntermediateState.empty[K, V](updater))
+
+  /* first element is the number of incoming callbacks,
+   * second element is the value that has been propagated to dependent cells (or initially bottom)
+   */
+  private val numIncomingCallbacks = new AtomicReference[(Int, V)]((0, updater.initial))
 
   // A list of callbacks to call, when `this` cell is completed/updated.
   // Note that this is not sync'ed with the state in any way, so calling `onComplete` or `onNext`
@@ -618,7 +626,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             // CAS was successful, so there was a point in time where `newVal` was in the cell
             // every dependent cell should pull the new value
             onNextHandler.foreach(_.apply(Success(newVal)))
-            current.nextDependentCells.foreach(_._1.updateDeps(this))
+
+            // If we came here via a direct putNext (instead of Outcome of a whenNextCallback)
+            // this incoming change has not been counted. So we need to manually start outgoing callbacks.
+            // (This might lead to duplicate invocation.)
+            if (numIncomingCallbacks.get()._1 <= 0)
+              triggerDependentCells()
+
             true
           }
         } else true
@@ -666,6 +680,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
       case (pre: IntermediateState[K, V], finalValue: FinalState[K, V]) =>
         // Inform dependent cells about the update.
+        // We do not need to take the number of incoming callbacks into account,
+        // because a final update always needs to be propagated.
         val dependentCells = pre.nextDependentCells.keys ++ pre.completeDependentCells
         dontCall match {
           case Some(cells) =>
@@ -1019,11 +1035,50 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     case t => Failure(t)
   }
 
+  /** Called, when a CallbackRunnable r with r.dependentCell == this has been started. */
+  override private[rasync] def incIncomingCallbacks(): Unit = {
+    val current = numIncomingCallbacks.get()
+
+    val next = (current._1 + 1, current._2)
+    if (!numIncomingCallbacks.compareAndSet(current, next))
+      incIncomingCallbacks()
+  }
+
+  /**
+   * Called, when a CallbackRunnable r with r.dependentCell == this has been completed.
+   * Triggers all dependent cells, if no more incoming callbacks are running.
+   */
+  override private[rasync] def decIncomingCallbacks(): Unit = {
+    val current = numIncomingCallbacks.get()
+
+    // If we drop to zero, store the current result as the latest propagated value
+    val next =
+      if (current._1 == 1)
+        (0, getResult())
+      else
+        (current._1 - 1, current._2)
+
+
+    if (numIncomingCallbacks.compareAndSet(current, next)) {
+      // CAS was successfull. Call dependent cells, if we dropped to zero and
+      // have new information to propagated
+      if (current._1 == 1 && next._2 != current._2)
+        triggerDependentCells()
+    } else decIncomingCallbacks()
+  }
+
+  def triggerDependentCells(): Unit = state.get match {
+    case pre: FinalState[_, _] =>
+      val cur = pre.asInstanceOf[FinalState[K, V]]
+      cur.nextDependentCells.keys.foreach(_.updateDeps(this))
+    case pre: IntermediateState[_, _] =>
+      val cur = pre.asInstanceOf[IntermediateState[K, V]]
+      cur.nextDependentCells.keys.foreach(_.updateDeps(this))
+  }
+
   override private[rasync] def updateDeps(otherCell: Cell[K, V]): Unit = state.get() match {
     case pre: IntermediateState[_, _] =>
 
-      // Store snapshots of the callbacks, as the Cell's callbacks might change
-      // before the update (see below) task gets executed
       val current = pre.asInstanceOf[IntermediateState[K, V]]
       val completeCallbacks = current.completeCallbacks.get(otherCell)
       val nextCallbacks = current.nextCallbacks.get(otherCell)
@@ -1033,11 +1088,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       pool.execute(() => {
         state.get() match {
           case _: IntermediateState[_, _] =>
+            // Indicate an intent to run a callback, then run it.
+            // This prevents premature updates in dependent cells.
             completeCallbacks.foreach { _.run() }
             nextCallbacks.foreach { _.run() }
             combinedCallbacks.foreach { _.run() }
           case _: FinalState[K, V] =>
-          /* We are final already, so we ignore all incoming information. */
+          /* We are final already, so we ignore all incoming information.
+            * Dependent cells do not need to be informed any more, as this
+            * has been done at the time, the cell has been completed.
+            */
         }
       })
     case _: FinalState[K, V] => /* We are final already, so we ignore all incoming information. */
