@@ -154,7 +154,7 @@ trait Cell[K <: Key[V], V] {
    *
    * @param otherCell The cell that received a new value.
    */
-  private[rasync] def updateDeps(otherCell: Cell[K, V]): Unit
+  private[rasync] def updateDeps(otherCell: Cell[K, V], removeCellAfter: Option[Cell[K, V]] = None): Unit
 
   /**
    * Remove the staged value `dependentCell` from the associated queue.
@@ -669,9 +669,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val dependentCells = pre.nextDependentCells.keys ++ pre.completeDependentCells
         dontCall match {
           case Some(cells) =>
-            dependentCells.foreach(c => if (!cells.contains(c)) c.updateDeps(this))
+            dependentCells.foreach(c => if (!cells.contains(c)) c.updateDeps(this, Some(this)))
           case None =>
-            dependentCells.foreach(_.updateDeps(this))
+            dependentCells.foreach(_.updateDeps(this, Some(this)))
         }
 
         // This cell does not depend on other cells any more.
@@ -1019,7 +1019,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     case t => Failure(t)
   }
 
-  override private[rasync] def updateDeps(otherCell: Cell[K, V]): Unit = state.get() match {
+  override private[rasync] def updateDeps(otherCell: Cell[K, V], removeCellAfter: Option[Cell[K, V]] = None): Unit = state.get() match {
     case pre: IntermediateState[_, _] =>
 
       // Store snapshots of the callbacks, as the Cell's callbacks might change
