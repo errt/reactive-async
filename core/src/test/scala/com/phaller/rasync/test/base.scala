@@ -755,34 +755,38 @@ class BaseSuite extends FunSuite {
   }
 
   test("whenNext: concurrent put final") {
-    var expectedValue: Option[Immutability] = None
 
-    for (_ <- 1 to 100) {
-      implicit val pool = new HandlerPool
-      val completer1 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
-      val completer2 = CellCompleter[ImmutabilityKey.type, Immutability](ImmutabilityKey)
 
-      val cell1 = completer1.cell
-      cell1.trigger()
+//    for (_ <- (1 to 10).par) {
+      var expectedValue: Option[Purity] = None
+      for (i <- 1 to 1000) {
+        println(s"\n\nstarting run $i")
+        implicit val pool = new HandlerPool
+        implicit val updater = Updater.partialOrderingToUpdater(Purity.PurityOrdering)
+        val completer1 = CellCompleter[PurityKey.type, Purity](PurityKey)
+        val completer2 = CellCompleter[PurityKey.type, Purity](PurityKey)
 
-      pool.execute(() => cell1.whenComplete(completer2.cell, x => {
-        NoOutcome
-      }))
+        val cell1 = completer1.cell
+        cell1.trigger()
 
-      pool.execute(() => cell1.whenNext(completer2.cell, x => {
-        if (x == Mutable) FinalOutcome(Mutable)
-        else NoOutcome
-      }))
-      pool.execute(() => completer2.putFinal(Mutable))
 
-      val fut = pool.quiescentResolveCell
-      Await.ready(fut, 2.seconds)
+        /*1*/ cell1.whenComplete(completer2.cell, _ => NoOutcome)
+        /*3*/ completer2.putFinal(Impure)
+        /*2*/ cell1.whenNext(completer2.cell, _ => FinalOutcome(Impure))
+        //      The test fails, if the order is 132 the "quiescentResolveCell" is not needed to get errors.
+        val countDownLatch = new CountDownLatch(1)
+        pool.onQuiescent(() => {
+          Thread.sleep(10)
+          countDownLatch.countDown()
 
-      if (expectedValue.isEmpty) expectedValue = Some(cell1.getResult())
-      else assert(cell1.getResult() == expectedValue.get)
+          pool.shutdown()
+        })
+        countDownLatch.await()
+        if (expectedValue.isEmpty) expectedValue = Some(cell1.getResult())
+        else assert(cell1.getResult() == expectedValue.get)
 
-      pool.onQuiescenceShutdown()
-    }
+      }
+//    }
   }
 
   test("whenNextSequential: concurrent put final") {
