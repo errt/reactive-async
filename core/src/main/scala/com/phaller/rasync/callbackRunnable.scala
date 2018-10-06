@@ -150,7 +150,6 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
   }
 
   def run(): Unit = {
-    println("running a NextCallbackRunnable")
     if (dependentCompleter.cell.isComplete) {
       return ;
     }

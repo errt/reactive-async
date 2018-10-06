@@ -519,7 +519,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             // Inform `other` that this cell depends on its updates.
             other.addNextDependentCell(this)
             // start calculations on `other` so that we eventually get its updates.
-//            pool.triggerExecution(other) removed for test only. re-include later! (the test fails with and without this line)
+            pool.triggerExecution(other)
           }
       }
     }
@@ -770,7 +770,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   @tailrec
   override final def removeNextCallbacks(cell: Cell[K, V]): Unit = {
-    println("removeNextCallbacks")
     state.get() match {
       case pre: IntermediateState[_, _] =>
         val current = pre.asInstanceOf[IntermediateState[K, V]]
@@ -779,9 +778,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells, newNextCallbacks, current.combinedCallbacks)
         if (!state.compareAndSet(current, newState))
           removeNextCallbacks(cell)
-//        else {
-//          if (newNextCallbacks.isEmpty) nonextdepslatch.countDown()
-//        }
+        else {
+          if (newNextCallbacks.isEmpty) nonextdepslatch.countDown()
+        }
       case _ => /* do nothing, completed cells do not have callbacks any more. */
     }
   }
@@ -817,7 +816,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   @tailrec
   override private[rasync] final def removeAllCallbacks(cell: Cell[K, V]): Unit = {
-    println("removeAllCallbacks")
     state.get() match {
       case pre: IntermediateState[_, _] =>
         val current = pre.asInstanceOf[IntermediateState[K, V]]
@@ -828,10 +826,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, newCompleteCallbacks, current.nextDependentCells, newNextCallbacks, newCombinedCallbacks)
         if (!state.compareAndSet(current, newState))
           removeAllCallbacks(cell)
-//        else {
-//          if (newNextCallbacks.isEmpty) nonextdepslatch.countDown()
-//          if (newCompleteCallbacks.isEmpty) nocompletedepslatch.countDown()
-//        }
+        else {
+          if (newNextCallbacks.isEmpty) nonextdepslatch.countDown()
+          if (newCompleteCallbacks.isEmpty) nocompletedepslatch.countDown()
+        }
       case _ => /* do nothing, completed cells do not have callbacks any more. */
     }
   }
@@ -848,10 +846,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, newCompleteCallbacks, current.nextDependentCells, newNextCallbacks, newCombinedCallbacks)
         if (!state.compareAndSet(current, newState))
           removeAllCallbacks(cells)
-//        else {
-//          if (newNextCallbacks.isEmpty) nonextdepslatch.countDown()
-//          if (newCompleteCallbacks.isEmpty) nocompletedepslatch.countDown()
-//        }
+        else {
+          if (newNextCallbacks.isEmpty) nonextdepslatch.countDown()
+          if (newCompleteCallbacks.isEmpty) nocompletedepslatch.countDown()
+        }
 
       case _ => /* do nothing, completed cells do not have callbacks any more. */
     }
@@ -1038,27 +1036,25 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
   override private[rasync] def updateDeps(otherCell: Cell[K, V], removeCellAfter: Option[Cell[K, V]] = None): Unit = state.get() match {
     case pre: IntermediateState[_, _] =>
-        println(s"calling updateDeps, $removeCellAfter")
+
       // Store snapshots of the callbacks, as the Cell's callbacks might change
       // before the update (see below) task gets executed
       val current = pre.asInstanceOf[IntermediateState[K, V]]
-//      val completeCallbacks = current.completeCallbacks.get(otherCell)
+      val completeCallbacks = current.completeCallbacks.get(otherCell)
       val nextCallbacks = current.nextCallbacks.get(otherCell)
-//      val combinedCallbacks = current.combinedCallbacks.get(otherCell)
-    println(s"numNextCallbacks = ${nextCallbacks.size}")
+      val combinedCallbacks = current.combinedCallbacks.get(otherCell)
+
       // eventually check for new values
       pool.execute(() => {
         state.get() match {
           case _: IntermediateState[_, _] =>
-//            completeCallbacks.foreach { _.run() }
+            completeCallbacks.foreach { _.run() }
             nextCallbacks.foreach { _.run() }
-//            combinedCallbacks.foreach { _.run() }
+            combinedCallbacks.foreach { _.run() }
           case _: FinalState[K, V] =>
           /* We are final already, so we ignore all incoming information. */
         }
         removeCellAfter foreach removeCompleteAndCombinedCallbacks
-//        removeCellAfter foreach removeCombinedCallbacks
-        //                println(this, otherCell, removeCellAfter)
       })
     case _: FinalState[K, V] => /* We are final already, so we ignore all incoming information. */
   }
