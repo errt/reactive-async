@@ -139,6 +139,7 @@ trait Cell[K <: Key[V], V] {
   def removeCompleteCallbacks(cell: Cell[K, V]): Unit
   def removeNextCallbacks(cell: Cell[K, V]): Unit
   def removeCombinedCallbacks(cell: Cell[K, V]): Unit
+  def removeCompleteAndCombinedCallbacks(cell: Cell[K, V]): Unit
 
   /**
    * Removes all callbacks that are called, when `cell` has been updated.
@@ -800,6 +801,21 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   @tailrec
+  override final def removeCompleteAndCombinedCallbacks(cell: Cell[K, V]): Unit = {
+    state.get() match {
+      case pre: IntermediateState[_, _] =>
+        val current = pre.asInstanceOf[IntermediateState[K, V]]
+        val newCombinedCallbacks = current.combinedCallbacks - cell
+        val newCompleteCallbacks = current.completeCallbacks - cell
+
+        val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, newCompleteCallbacks, current.nextDependentCells, current.nextCallbacks, newCombinedCallbacks)
+        if (!state.compareAndSet(current, newState))
+          removeCompleteAndCombinedCallbacks(cell)
+      case _ => /* do nothing, completed cells do not have callbacks any more. */
+    }
+  }
+
+  @tailrec
   override private[rasync] final def removeAllCallbacks(cell: Cell[K, V]): Unit = {
     println("removeAllCallbacks")
     state.get() match {
@@ -1040,8 +1056,9 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case _: FinalState[K, V] =>
           /* We are final already, so we ignore all incoming information. */
         }
-        removeCellAfter foreach removeAllCallbacks
-//                println(this, otherCell, removeCellAfter)
+        removeCellAfter foreach removeCompleteAndCombinedCallbacks
+//        removeCellAfter foreach removeCombinedCallbacks
+        //                println(this, otherCell, removeCellAfter)
       })
     case _: FinalState[K, V] => /* We are final already, so we ignore all incoming information. */
   }
