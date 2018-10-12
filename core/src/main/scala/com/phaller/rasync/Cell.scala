@@ -10,7 +10,11 @@ import lattice.{ DefaultKey, Key, PartialOrderingWithBottom, Updater }
 import scala.collection.concurrent.TrieMap
 
 trait Cell[K <: Key[V], V] {
+  /** The completer associated with this cell. */
   private[rasync] val completer: CellCompleter[K, V]
+
+  /** True, if associated callbacks need to be executed sequentially, otherwise false. */
+  val sequential: Boolean
 
   def key: K
 
@@ -46,7 +50,6 @@ trait Cell[K <: Key[V], V] {
    * @param valueCallback  Callback that receives the final value of `other` and returns an `Outcome` for `this` cell.
    */
   def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
-  def whenCompleteSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
 
   /**
    * Adds a dependency on some `other` cell.
@@ -63,7 +66,6 @@ trait Cell[K <: Key[V], V] {
    * @param valueCallback  Callback that receives the new value of `other` and returns an `Outcome` for `this` cell.
    */
   def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
-  def whenNextSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit
 
   /**
    * Adds a dependency on some `other` cell.
@@ -81,7 +83,6 @@ trait Cell[K <: Key[V], V] {
    * @param valueCallback  Callback that receives the new value of `other` and returns an `Outcome` for `this` cell.
    */
   def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
-  def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
 
   def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
 
@@ -186,6 +187,11 @@ trait Cell[K <: Key[V], V] {
   def isADependee(): Boolean
 
   def removeDependency(otherCell: Cell[K, V]): Unit
+
+  protected type CR <: CallbackRunnable[K, V]
+  protected type WCR <: CR with CombinedCallbackRunnable[K, V]
+  protected type WNCR <: CR with NextCallbackRunnable[K, V]
+  protected type WCCR <: CR with CompleteCallbackRunnable[K, V]
 }
 
 object Cell {
@@ -204,7 +210,7 @@ object Cell {
         c.onComplete {
           case Success(x) =>
             completer.putFinal(List(x))
-          case f @ Failure(_) =>
+          case f@Failure(_) =>
             completer.tryComplete(f.asInstanceOf[Failure[List[V]]], None)
         }
       case c :: cs =>
@@ -215,16 +221,22 @@ object Cell {
             tailCell.onComplete {
               case Success(xs) =>
                 completer.putFinal(x :: xs)
-              case f @ Failure(_) =>
+              case f@Failure(_) =>
                 completer.tryComplete(f, None)
             }
-          case f @ Failure(_) =>
+          case f@Failure(_) =>
             completer.tryComplete(f.asInstanceOf[Failure[List[V]]], None)
         }
     }
     completer.cell
   }
+}
 
+trait ConcurrentCell[K <: Key[V], V] extends Cell[K, V] {
+  val sequential = false
+}
+trait SequentialCell[K <: Key[V], V] extends Cell[K, V] {
+  val sequential = true
 }
 
 /**
@@ -282,7 +294,7 @@ private class FinalState[K <: Key[V], V](
  *
  * Instances of the class use a `State` to store the current value and dependency information.
  */
-private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], override val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
+private abstract class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: Updater[V], override val init: (Cell[K, V]) => Outcome[V]) extends Cell[K, V] with CellCompleter[K, V] {
   implicit val ctx: HandlerPool = pool
 
   // Used for tests only.
@@ -444,14 +456,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
-    this.when(other, valueCallback, sequential = false)
-  }
-
-  override def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit = {
-    this.when(other, valueCallback, sequential = true)
-  }
-
-  private def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V], sequential: Boolean): Unit = {
     var success = false
     while (!success) { // repeat until compareAndSet succeeded (or the dependency is outdated)
       state.get() match {
@@ -467,6 +471,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
               true // another combined dependency has been registered already. Ignore the new (duplicate) one. // TODO maybe remove this case distinction. By only using the else part, "old" callbacks get replaced.
             else {
               val newCallback: CombinedCallbackRunnable[K, V] =
+                // this IF could be replaced by a factory method createCombinedRunnable(…) in Cell/ConcurrentCell/SequentialCell.
                 if (sequential) new CombinedSequentialCallbackRunnable(pool, this, other, valueCallback)
                 else new CombinedConcurrentCallbackRunnable(pool, this, other, valueCallback)
 
@@ -485,14 +490,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
-    this.whenNext(other, valueCallback, sequential = false)
-  }
-
-  override def whenNextSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
-    this.whenNext(other, valueCallback, sequential = true)
-  }
-
-  private def whenNext(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean): Unit = {
     var success = false
     while (!success) { // repeat until compareAndSet succeeded (or the dependency is outdated)
       state.get() match {
@@ -508,6 +505,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
               true // another combined dependency has been registered already. Ignore the new (duplicate) one. // TODO maybe remove this case distinction. By only using the else part, "old" callbacks get replaced.
             else {
               val newCallback: NextCallbackRunnable[K, V] =
+                // this IF could be replaced by a factory method createCombinedRunnable(…) in Cell/ConcurrentCell/SequentialCell.
                 if (sequential) new NextSequentialCallbackRunnable(pool, this, other, valueCallback)
                 else new NextConcurrentCallbackRunnable(pool, this, other, valueCallback)
 
@@ -526,14 +524,6 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   }
 
   override def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
-    this.whenComplete(other, valueCallback, false)
-  }
-
-  override def whenCompleteSequential(other: Cell[K, V], valueCallback: V => Outcome[V]): Unit = {
-    this.whenComplete(other, valueCallback, true)
-  }
-
-  private def whenComplete(other: Cell[K, V], valueCallback: V => Outcome[V], sequential: Boolean): Unit = {
     var success = false
     while (!success) {
       state.get() match {
@@ -548,6 +538,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
             if (current.completeCallbacks.contains(other)) true
             else {
               val newCallback: CompleteCallbackRunnable[K, V] =
+                // this IF could be replaced by a factory method createCombinedRunnable(…) in Cell/ConcurrentCell/SequentialCell.
                 if (sequential) new CompleteSequentialCallbackRunnable(pool, this, other, valueCallback)
                 else new CompleteConcurrentCallbackRunnable(pool, this, other, valueCallback)
 
@@ -1057,3 +1048,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     otherCell.removeDependentCell(this)
   }
 }
+
+private class ConcurrentCellImpl[K <: Key[V], V](pool: HandlerPool, override val key: K, updater: Updater[V], override val init: (Cell[K, V]) => Outcome[V])
+  extends CellImpl[K, V](pool, key,updater, init)
+  with ConcurrentCell[K, V]
+
+private class SequentialCellImpl[K <: Key[V], V](pool: HandlerPool, override val key: K, updater: Updater[V], override val init: (Cell[K, V]) => Outcome[V])
+  extends CellImpl[K, V](pool, key,updater, init)
+  with SequentialCell[K, V]

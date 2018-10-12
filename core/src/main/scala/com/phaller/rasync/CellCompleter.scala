@@ -55,7 +55,17 @@ object CellCompleter {
    * given a `HandlerPool` and a `Key[V]`.
    */
   def apply[K <: Key[V], V](key: K, init: (Cell[K, V]) => Outcome[V] = (_: Cell[K, V]) => NoOutcome)(implicit updater: Updater[V], pool: HandlerPool): CellCompleter[K, V] = {
-    val impl = new CellImpl[K, V](pool, key, updater, init)
+    val impl = new ConcurrentCellImpl[K, V](pool, key, updater, init)
+    pool.register(impl)
+    impl
+  }
+
+  /**
+   * Create a completer for a cell holding values of type `V`
+   * given a `HandlerPool` and a `Key[V]`.
+   */
+  def sequential[K <: Key[V], V](key: K, init: (Cell[K, V]) => Outcome[V] = (_: Cell[K, V]) => NoOutcome)(implicit updater: Updater[V], pool: HandlerPool): CellCompleter[K, V] = {
+    val impl = new SequentialCellImpl[K, V](pool, key, updater, init)
     pool.register(impl)
     impl
   }
@@ -67,7 +77,8 @@ object CellCompleter {
    * `DefaultKey[V]`, no other key would make sense.
    */
   def completed[V](result: V)(implicit updater: Updater[V], pool: HandlerPool): CellCompleter[DefaultKey[V], V] = {
-    val impl = new CellImpl[DefaultKey[V], V](pool, new DefaultKey[V], updater, _ => NoOutcome)
+    // As this cell is completed already, it does not matter, if the cell is sequential or not.
+    val impl = new ConcurrentCellImpl[DefaultKey[V], V](pool, new DefaultKey[V], updater, _ => NoOutcome)
     pool.register(impl)
     impl.putFinal(result)
     impl

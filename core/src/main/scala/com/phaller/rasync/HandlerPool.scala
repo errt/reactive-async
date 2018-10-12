@@ -53,6 +53,23 @@ class HandlerPool(
   }
 
   /**
+   * Returns a new sequential cell in this HandlerPool.
+   *
+   * Creates a new cell with the given key. The `init` method is used to
+   * determine an initial value for that cell and to set up dependencies via `whenNext`.
+   * It gets called, when the cell is awaited, either directly by the triggerExecution method
+   * of the HandlerPool or if a cell that depends on this cell is awaited.
+   *
+   * @param key The key to resolve this cell if in a cycle or no result computed.
+   * @param init A callback to return the initial value for this cell and to set up dependencies.
+   * @param updater The updater used to update the value of this cell.
+   * @return Returns a cell.
+   */
+  def mkSequentialCell[K <: Key[V], V](key: K, init: (Cell[K, V]) => Outcome[V])(implicit updater: Updater[V]): Cell[K, V] = {
+    CellCompleter.sequential(key, init)(updater, this).cell
+  }
+
+  /**
    * Returns a new cell in this HandlerPool.
    *
    * Creates a new, completed cell with value `v`.

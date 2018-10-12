@@ -14,13 +14,13 @@ class PsSuite extends FunSuite {
 
   test("cell dependency on itself whenNextSequential") {
     implicit val pool = new HandlerPool
-    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer1 = CellCompleter.sequential[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell1 = completer1.cell
 
     cell1.trigger()
     completer1.putNext(10)
 
-    cell1.whenNextSequential(cell1, _ => {
+    cell1.whenNext(cell1, _ => {
       NoOutcome
     })
 
@@ -40,8 +40,8 @@ class PsSuite extends FunSuite {
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    val completer10 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
-    val completer20 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer10 = CellCompleter.sequential[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer20 = CellCompleter.sequential[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell10 = completer10.cell
     val cell20 = completer20.cell
 
@@ -54,7 +54,7 @@ class PsSuite extends FunSuite {
     })
 
     completer20.putNext(1)
-    cell20.whenNextSequential(cell10, x => {
+    cell20.whenNext(cell10, x => {
       if (x == 10) {
         completer20.putFinal(43)
       }
@@ -90,13 +90,13 @@ class PsSuite extends FunSuite {
 
   test("cell dependency on itself whenNextSequential using fallback only") {
     implicit val pool = new HandlerPool(parallelism = 8)
-    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer1 = CellCompleter.sequential[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell1 = completer1.cell
 
     cell1.trigger()
     completer1.putNext(10)
 
-    cell1.whenNextSequential(cell1, _ => {
+    cell1.whenNext(cell1, _ => {
       NoOutcome
     })
 
@@ -106,12 +106,12 @@ class PsSuite extends FunSuite {
 
   test("HandlerPool must be able to interrupt") {
     implicit val pool = new HandlerPool(parallelism = 8)
-    val completer1 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
-    val completer2 = CellCompleter[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer1 = CellCompleter.sequential[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
+    val completer2 = CellCompleter.sequential[ReactivePropertyStoreKey, Int](new ReactivePropertyStoreKey())
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    cell2.whenNextSequential(cell1, v => {
+    cell2.whenNext(cell1, v => {
       NextOutcome(v)
     })
 
