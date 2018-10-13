@@ -80,17 +80,15 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
   // must be filled in before running it
   var started: AtomicBoolean = new AtomicBoolean(false)
 
-  protected def callCallback(x: V): Outcome[V] = {
-    if (sequential) {
-      dependentCompleter.sequential {
-        callback(x)
-      }
-    } else {
-      callback(x)
-    }
-  }
-
   def run(): Unit = {
+    if (sequential) {
+      dependentCompleter.sequential(callCallback _)
+    } else {
+      callCallback()
+    }
+
+  }
+  def callCallback(): Unit = {
     if (!started.getAndSet(true)) { // can't complete it twice
       if (dependentCompleter.cell.isComplete) {
         return ;
@@ -99,7 +97,7 @@ private[rasync] abstract class CompleteCallbackRunnable[K <: Key[V], V](
       // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
       otherCell.pollFor(dependentCompleter.cell, completeDep) match {
         case FinalOutcome(x) =>
-          callCallback(x) match { // execute callback
+          callback(x) match { // execute callback
             case FinalOutcome(v) =>
               dependentCompleter.putFinal(v) // callbacks will be removed by putFinal()
             case NextOutcome(v) =>
@@ -139,17 +137,15 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
 
   override protected final val completeDep = false
 
-  protected def callCallback(x: V): Outcome[V] = {
+  def run(): Unit = {
     if (sequential) {
-      dependentCompleter.sequential {
-        callback(x)
-      }
+      dependentCompleter.sequential(callCallback _)
     } else {
-      callback(x)
+      callCallback()
     }
   }
 
-  def run(): Unit = {
+  def callCallback(): Unit = {
     if (dependentCompleter.cell.isComplete) {
       return ;
     }
@@ -157,7 +153,7 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
     // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
     otherCell.pollFor(dependentCompleter.cell, completeDep) match {
       case Outcome(x, isFinal) =>
-        callCallback(x) match {
+        callback(x) match {
           case NextOutcome(v) =>
             dependentCompleter.putNext(v)
           case FinalOutcome(v) =>
@@ -196,9 +192,7 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
 
   def run(): Unit = {
     if (sequential) {
-      dependentCompleter.sequential {
-        callCallback()
-      }
+      dependentCompleter.sequential(callCallback _)
     } else {
       callCallback()
     }

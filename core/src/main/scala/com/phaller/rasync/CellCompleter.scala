@@ -45,7 +45,7 @@ trait CellCompleter[K <: Key[V], V] {
    * Run code for `this` cell sequentially.
    * @return The result of `f`.
    */
-  def sequential[T](f: => T): T
+  def sequential(f: () => _): Unit
 }
 
 object CellCompleter {

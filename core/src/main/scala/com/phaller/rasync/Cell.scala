@@ -1,13 +1,15 @@
 package com.phaller.rasync
 
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{ CountDownLatch, ExecutionException }
+import java.util.concurrent.{ConcurrentHashMap, CountDownLatch, ExecutionException}
 
 import scala.annotation.tailrec
-import scala.util.{ Failure, Success, Try }
-import lattice.{ DefaultKey, Key, PartialOrderingWithBottom, Updater }
+import scala.util.{Failure, Success, Try}
+import lattice.{DefaultKey, Key, PartialOrderingWithBottom, Updater}
 
 import scala.collection.concurrent.TrieMap
+import scala.collection.immutable.Queue
+import scala.util.control.NonFatal
 
 trait Cell[K <: Key[V], V] {
   private[rasync] val completer: CellCompleter[K, V]
@@ -306,7 +308,67 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   override val cell: Cell[K, V] = this
   override val completer: CellCompleter[K, V] = this.asInstanceOf[CellCompleter[K, V]]
 
-  override def sequential[T](f: => T): T = this.synchronized(f)
+  private val seqTasks = new AtomicReference[Queue[() => _]](Queue()) // use `values` to store all pending sequential triggers
+
+
+  /**
+    * Adds sequential callback.
+    * The dependent cell is read from the NextDepRunnable object.
+    *
+    * @param callback The callback that should be run sequentially to all other sequential callbacks for the dependent cell.
+    */
+  override def sequential(callback: () => _): Unit = {
+    var success = false
+    var startCallback = false
+    while (!success) {
+      val oldCallbackQueue = seqTasks.get()
+      val newCallbackQueue = oldCallbackQueue.enqueue(callback)
+      success = seqTasks.compareAndSet(oldCallbackQueue, newCallbackQueue)
+      startCallback = oldCallbackQueue.isEmpty
+
+    }
+
+    // If the list has been empty, then start execution the scheduled tasks. (Otherwise, some task is already running
+    // and the newly added task will eventually run.
+    if (startCallback)
+      callSequentialCallback()
+  }
+
+  /**
+    * Returns the the queue of yet to be run callbacks.
+    * Called by callSequentialCallback after one callback has been run.
+    * If the returned list is not empty, a next callback must be run.
+    */
+  @tailrec
+  private def dequeueSequentialCallback[K <: Key[V], V](): Queue[() => _] = {
+      // remove the task that has just been finished
+      val oldCallbackQueue = seqTasks.get()
+      val (_, newCallbackQueue) = oldCallbackQueue.dequeue
+
+      // store the new list of tasks
+      if (seqTasks.compareAndSet(oldCallbackQueue, newCallbackQueue)) newCallbackQueue
+      else dequeueSequentialCallback() // try again
+  }
+
+  private def callSequentialCallback[K <: Key[V], V](): Unit = {
+    pool.execute(new Runnable {
+      def run(): Unit = {
+        val tasks = seqTasks.get()
+        /*
+          Pop an element from the queue only if it is completely done!
+          That way, one can always start running sequential callbacks, if the list has been empty.
+         */
+        val task = tasks.head // The queue must not be empty! Caller has to assert this.
+        try {
+          task()
+        } finally {
+          // The task has been run. Remove it. If the new list is not empty, callSequentialCallback(cell)
+          if (dequeueSequentialCallback().nonEmpty)
+            callSequentialCallback()
+        }
+      }
+    })
+  }
 
   override def getResult(): V = state.get() match {
     case finalRes: FinalState[K, V] =>
