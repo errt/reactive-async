@@ -894,22 +894,11 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       val current = pre.asInstanceOf[FinalState[K, V]]
 
       if (completeDep) {
-        if (current.completeDependentCells.contains(dependentCell)) {
-          /* Return v but clear staging before. This avoids repeated invocations of the same callback later. */
-
-          current.completeDependentCells.remove(dependentCell)
-          FinalOutcome(current.res.get)
-        } else {
-          NoOutcome
-        }
-
+        current.completeDependentCells.remove(dependentCell) // clear the stage
+          .map(_ => FinalOutcome(current.res.get)).getOrElse(NoOutcome) // return an outcome, if a value has been present
       } else {
-        if (current.nextDependentCells.contains(dependentCell)) {
-          /* Return v but clear staging before. This avoids repeated invocations of the same callback later. */
-
-          current.nextDependentCells.remove(dependentCell)
-          FinalOutcome(current.res.get)
-        } else NoOutcome
+        current.nextDependentCells.remove(dependentCell) // clear the stage
+          .map(_ => FinalOutcome(current.res.get)).getOrElse(NoOutcome) // return an outcome, if a value has been present.
       }
 
     case pre: IntermediateState[_, _] =>
