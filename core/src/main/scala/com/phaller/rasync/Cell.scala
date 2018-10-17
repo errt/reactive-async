@@ -243,7 +243,11 @@ private trait State[V]
  */
 private class IntermediateState[K <: Key[V], V](
   /** The result currently stored in the cell.  */
-  val res: V,
+  /* This will always be wrapped in NextOutcome(_) because
+   we would otherwise have to create a lot of NextOutcome at different places
+   and pass them around. With this NextOutcome(_) we can always use the same
+   object. */
+  val res: NextOutcome[V],
   /** `true`, if the `init` method has been called.  */
   val tasksActive: Boolean,
 
@@ -253,7 +257,7 @@ private class IntermediateState[K <: Key[V], V](
   /** A list of cells that `this` cell depends on mapped to the callbacks to call, if those cells change. */
   val completeCallbacks: Map[Cell[K, V], CompleteCallbackRunnable[K, V]],
   /** A list of cells that depend on `this` cell mapped to a one-element-queue that contains a staged value to propagate. */
-  val nextDependentCells: Map[Cell[K, V], Option[V]],
+  val nextDependentCells: Map[Cell[K, V], Outcome[V]],
   /** A list of cells that `this` cell depends on mapped to the callbacks to call, if those cells change. */
   val nextCallbacks: Map[Cell[K, V], NextCallbackRunnable[K, V]],
   /** A list of cells that `this` cell depends on mapped to the callbacks to call, if those cells change. */
@@ -261,12 +265,12 @@ private class IntermediateState[K <: Key[V], V](
 
 private object IntermediateState {
   def empty[K <: Key[V], V](updater: Updater[V]): IntermediateState[K, V] =
-    new IntermediateState[K, V](updater.initial, false, List(), Map(), Map(), Map(), Map())
+    new IntermediateState[K, V](NextOutcome(updater.initial), false, List(), Map(), Map(), Map(), Map())
 }
 
 private class FinalState[K <: Key[V], V](
   /** The final result of this cell.*/
-  val res: Try[V],
+  val res: Try[FinalOutcome[V]],
   /*
   * When a cell is completed, all `completeDependentCells` are copied from the IntermediateState
   * to the FinalState. That way, we know that the dependentCell may poll a staged value (at most) one
@@ -311,10 +315,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
   override def getResult(): V = state.get() match {
     case finalRes: FinalState[K, V] =>
       finalRes.res match {
-        case Success(result) => result
+        case Success(result) => result.value
         case Failure(err) => throw new IllegalStateException(err)
       }
-    case raw: IntermediateState[K, V] => raw.res
+    case raw: IntermediateState[K, V] => raw.res.value
   }
 
   override def trigger(): Unit = {
@@ -601,16 +605,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
       case raw: IntermediateState[_, _] => // not completed
         val current = raw.asInstanceOf[IntermediateState[K, V]]
-        val newVal = tryJoin(current.res, value)
-        if (current.res != newVal) {
+        val newVal = tryJoin(current.res.value, value)
+        if (current.res.value != newVal) {
 
           // create "staging" for dependent cells.
           // To avoid multiple compareAndSets, this is not moved to a different method
           val newNextDeps = current.nextDependentCells.map {
-            case (c, _) => (c, Some(newVal))
+            case (c, _) => (c, NextOutcome(newVal))
           }
-
-          val newState = new IntermediateState(newVal, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDeps, current.nextCallbacks, current.combinedCallbacks)
+          // do not wrap NextOutcome AGAIN and AGAIN in the next line, see issue32
+          val newState = new IntermediateState(NextOutcome(newVal), current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDeps, current.nextCallbacks, current.combinedCallbacks)
 
           if (!state.compareAndSet(current, newState)) {
             tryNewState(value)
@@ -635,7 +639,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
     state.get() match {
       case current: IntermediateState[_, _] =>
         val currentState = current.asInstanceOf[IntermediateState[K, V]]
-        val newVal = tryJoin(currentState.res, v.get)
+        val newVal = tryJoin(currentState.res.value, v.get)
 
         // Copy completeDependentCells/nextDependentCells from IntermediateState to FinalState.
         val newCompleteDependentCells: TrieMap[Cell[K, V], Unit] = new TrieMap()
@@ -643,7 +647,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         currentState.completeDependentCells.foreach(c => newCompleteDependentCells.put(c, ()))
         currentState.nextDependentCells.foreach(c => newNextDependentCells.put(c._1, ()))
         val newState = new FinalState[K, V](
-          Success(newVal),
+          Success(FinalOutcome(newVal)),
           newCompleteDependentCells,
           newNextDependentCells)
 
@@ -679,8 +683,8 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         pre.nextCallbacks.keys.foreach(_.removeDependentCell(this))
         pre.completeCallbacks.keys.foreach(_.removeDependentCell(this))
 
-        onCompleteHandler.foreach(_.apply(finalValue.res))
-        onNextHandler.foreach(_.apply(finalValue.res))
+        onCompleteHandler.foreach(_.apply(finalValue.res.map(_.value)))
+        onNextHandler.foreach(_.apply(finalValue.res.map(_.value)))
 
         true
     }
@@ -895,10 +899,10 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
 
       if (completeDep) {
         current.completeDependentCells.remove(dependentCell) // clear the stage
-          .map(_ => FinalOutcome(current.res.get)).getOrElse(NoOutcome) // return an outcome, if a value has been present
+          .map(_ => current.res.get).getOrElse(NoOutcome) // return an outcome, if a value has been present
       } else {
         current.nextDependentCells.remove(dependentCell) // clear the stage
-          .map(_ => FinalOutcome(current.res.get)).getOrElse(NoOutcome) // return an outcome, if a value has been present.
+          .map(_ => current.res.get).getOrElse(NoOutcome) // return an outcome, if a value has been present.
       }
 
     case pre: IntermediateState[_, _] =>
@@ -907,15 +911,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       } else {
         val current = pre.asInstanceOf[IntermediateState[K, V]]
 
-        current.nextDependentCells.getOrElse(dependentCell, None) match {
-          case Some(v) =>
+        current.nextDependentCells.getOrElse(dependentCell, NoOutcome) match {
+          case res @ NextOutcome(v) =>
             // Return v but clear staging before.
             // None signals, that the staged value has been pulled.
-            val newNextDependentCells = current.nextDependentCells + (dependentCell -> None)
+            val newNextDependentCells = current.nextDependentCells + (dependentCell -> NoOutcome)
             val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, newNextDependentCells, current.nextCallbacks, current.combinedCallbacks)
             if (!state.compareAndSet(current, newState)) pollFor(dependentCell, completeDep) // try again
-            else NextOutcome(v)
-          case None => NoOutcome /* just return that no new value is available. Own state does not need to be changed. */
+            else res
+          case _ => NoOutcome /* just return that no new value is available. Own state does not need to be changed. */
+          /* The default case _ includes FinalOutcome, that is impossible for IntermediateStates */
         }
       }
   }
@@ -929,18 +934,14 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         else current.nextDependentCells.contains(dependentCell)
 
       if (valueStaged)
-        // Pass the staged value. See "to do" in getStagedValue
-        FinalOutcome(current.res.get)
+        // Pass the staged value. See "to do" in pollFor
+        current.res.get
       else
         NoOutcome
 
     case pre: IntermediateState[_, _] =>
       val current = pre.asInstanceOf[IntermediateState[K, V]]
-      val result = current.nextDependentCells.get(dependentCell).map({
-        case Some(v) => NextOutcome(v)
-        case None => NoOutcome
-      }).getOrElse(NoOutcome)
-      result
+      current.nextDependentCells.getOrElse(dependentCell, NoOutcome)
   }
 
   /**
@@ -981,16 +982,16 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
         val current = pre.asInstanceOf[IntermediateState[K, V]]
 
         val staged =
-          if (current.res != updater.initial)
-            Some(current.res) // If the value of this cell has already been changed before, we can immediately inform the dependent cell about this update.
+          if (current.res.value != updater.initial)
+            current.res // If the value of this cell has already been changed before, we can immediately inform the dependent cell about this update.
           else
-            None // No update yet
+            NoOutcome // No update yet
 
         val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells + (dependentCell -> staged), current.nextCallbacks, current.combinedCallbacks)
         if (!state.compareAndSet(pre, newState))
           triggerOrAddNextDependentCell(dependentCell)
         else // compareAndSet has been successful. Propagate a new value, if present.
-        if (staged.isDefined) dependentCell.updateDeps(this)
+        if (staged != NoOutcome) dependentCell.updateDeps(this)
     }
 
   // copied from object `impl.Promise`

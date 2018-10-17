@@ -156,18 +156,15 @@ private[rasync] abstract class NextCallbackRunnable[K <: Key[V], V](
 
     // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
     otherCell.pollFor(dependentCompleter.cell, completeDep) match {
-      case Outcome(x, isFinal) =>
+      case Outcome(x, dependerIsFinal) =>
         callCallback(x) match {
-          case NextOutcome(v) =>
-            dependentCompleter.putNext(v)
-          case FinalOutcome(v) =>
-            dependentCompleter.putFinal(v)
+          case Outcome(v, isFinal) => dependentCompleter.put(v, isFinal)
           case _ => /* do nothing, the value of */
         }
 
         // If `otherCell` has been completed with `x`, the nextCallback can be removed
         // (completeCallbacks will be removed by themselves after they have been run)
-        if (isFinal) dependentCompleter.cell.removeNextCallbacks(otherCell)
+        if (dependerIsFinal) dependentCompleter.cell.removeNextCallbacks(otherCell)
       case _ => /* No new value is present. */
     }
   }
@@ -211,17 +208,14 @@ private[rasync] abstract class CombinedCallbackRunnable[K <: Key[V], V](
 
     // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
     otherCell.pollFor(dependentCompleter.cell, completeDep) match {
-      case Outcome(x, isFinal) =>
-        callback(x, isFinal) match {
-          case NextOutcome(v) =>
-            dependentCompleter.putNext(v)
-          case FinalOutcome(v) =>
-            dependentCompleter.putFinal(v)
+      case Outcome(x, dependerIsFinal) =>
+        callback(x, dependerIsFinal) match {
+          case Outcome(v, isFinal) => dependentCompleter.put(v, isFinal)
           case _ => /* do nothing, the value of */
         }
 
         // If `otherCell` has been completed with `x`, the nextCallback can be removed
-        if (isFinal) dependentCompleter.cell.removeCombinedCallbacks(otherCell)
+        if (dependerIsFinal) dependentCompleter.cell.removeCombinedCallbacks(otherCell)
       case _ => /* No new value is present. */
     }
   }
