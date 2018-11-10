@@ -62,3 +62,17 @@ object CellsWithManyPredecessorsLast extends SchedulingStrategy {
 
   override def calcPriority[K <: Key[V], V](dependentCell: Cell[K, V]): Int = 0
 }
+
+object CellsWithManySuccessorsFirst extends SchedulingStrategy {
+  override def calcPriority[K <: Key[V], V](dependentCell: Cell[K, V], other: Cell[K, V]): Int =
+    -(dependentCell.numNextDependentCells + dependentCell.numCompleteDependentCells)
+
+  override def calcPriority[K <: Key[V], V](dependentCell: Cell[K, V]): Int = 0
+}
+
+object CellsWithManySuccessorsLast extends SchedulingStrategy {
+  override def calcPriority[K <: Key[V], V](dependentCell: Cell[K, V], other: Cell[K, V]): Int =
+    dependentCell.numNextDependentCells + dependentCell.numCompleteDependentCells
+
+  override def calcPriority[K <: Key[V], V](dependentCell: Cell[K, V]): Int = 0
+}
