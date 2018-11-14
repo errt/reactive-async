@@ -22,10 +22,10 @@ private class PoolState(val handlers: List[() => Unit] = List(), val submittedTa
 class HandlerPool(
   val parallelism: Int = Runtime.getRuntime.availableProcessors(),
   unhandledExceptionHandler: Throwable => Unit = _.printStackTrace(),
-  schedulingStrategy: Option[SchedulingStrategy] = None) {
+  val schedulingStrategy: SchedulingStrategy = DefaultScheduling) {
 
   private val pool: AbstractExecutorService =
-    if (schedulingStrategy.isEmpty)
+    if (schedulingStrategy == DefaultScheduling)
       new ForkJoinPool(parallelism)
     else
       new ThreadPoolExecutor(parallelism, parallelism, Int.MaxValue, TimeUnit.NANOSECONDS, new PriorityBlockingQueue[Runnable]())
@@ -48,8 +48,6 @@ class HandlerPool(
   }
 
   def remainingTasks(): Int = poolState.get.submittedTasks
-
-  val getSchedulingStrategy: SchedulingStrategy = schedulingStrategy.getOrElse(DefaultScheduling)
 
   /**
    * Returns a new cell in this HandlerPool.
@@ -287,7 +285,7 @@ class HandlerPool(
           // we can now safely put a final value
           c.resolveWithValue(v, cells)
         }
-      }, getSchedulingStrategy.calcPriority(c))
+      }, schedulingStrategy.calcPriority(c))
   }
 
   /**
