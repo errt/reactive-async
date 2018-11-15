@@ -1597,6 +1597,28 @@ class BaseSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
+  test("whenNext: mini cSCC with constant resolution") {
+    implicit val pool = new HandlerPool(1)
+
+    val completer1 = CellCompleter[StringIntKey, Int]("somekey1")
+    val cell1 = completer1.cell
+    val completer2 = CellCompleter[StringIntKey, Int]("somekey2")
+    val cell2 = completer2.cell
+
+    // create a cSCC, assert that none of the callbacks get called again.
+    cell1.whenNext(cell2, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+    cell2.whenNext(cell1, v => if (v != -1) { assert(false); NextOutcome(-2) } else NoOutcome)
+
+    // set unwanted values:
+    completer1.putNext(-1)
+
+    // resolve cells
+    val fut = pool.quiescentResolveCell
+    Await.result(fut, 10.hours)
+
+    pool.shutdown()
+  }
+
   test("whenNext: cSCC with constant resolution") {
     val latch = new CountDownLatch(4)
 
@@ -1639,7 +1661,7 @@ class BaseSuite extends FunSuite {
 
     // resolve cells
     val fut = pool.quiescentResolveCell
-    Await.result(fut, 2.seconds)
+    Await.result(fut, 10.seconds)
     latch.await()
 
     pool.onQuiescenceShutdown()
