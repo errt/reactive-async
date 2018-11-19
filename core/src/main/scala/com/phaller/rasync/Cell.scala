@@ -12,6 +12,8 @@ import scala.collection.concurrent.TrieMap
 trait Cell[K <: Key[V], V] {
   private[rasync] val completer: CellCompleter[K, V]
 
+  @volatile var obj: AnyRef = _
+
   def key: K
 
   /**

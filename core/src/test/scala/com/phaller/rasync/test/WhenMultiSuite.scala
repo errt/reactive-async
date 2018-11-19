@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 
 import com.phaller.rasync.lattice._
-import com.phaller.rasync.lattice.lattices.{ NaturalNumberKey, NaturalNumberLattice }
+import com.phaller.rasync.lattice.lattices.{ NaturalNumberKey, NaturalNumberLattice, PowerSetLattice }
 import com.phaller.rasync.test.lattice._
 import org.scalatest.FunSuite
 
@@ -17,7 +17,7 @@ class WhenMultiSuite extends FunSuite {
 
   implicit val stringIntUpdater: Updater[Int] = new StringIntUpdater
 
-  test("when: values passed to callback") {
+  test("when: values passed to callback 1") {
     val latch1 = new CountDownLatch(1)
     val latch2 = new CountDownLatch(1)
 
@@ -64,7 +64,7 @@ class WhenMultiSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-  test("whenSequential: values passed to callback") {
+  test("whenSequential: values passed to callback 1") {
     val latch1 = new CountDownLatch(1)
     val latch2 = new CountDownLatch(1)
 
@@ -109,6 +109,182 @@ class WhenMultiSuite extends FunSuite {
     assert(cell1.isComplete)
 
     pool.onQuiescenceShutdown()
+  }
+
+  test("whenMulti: values passed to callback 2") {
+    val latch1 = new CountDownLatch(1)
+
+    implicit val pool = new HandlerPool
+    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
+    val completer20 = CellCompleter[StringIntKey, Int]("someotherkey")
+    val completer21 = CellCompleter[StringIntKey, Int]("someotherkey")
+    val completer22 = CellCompleter[StringIntKey, Int]("someotherkey")
+
+    val cell1 = completer1.cell
+    cell1.whenMulti(List(completer20.cell, completer22.cell, completer21.cell), {
+      case completer20.cell =>
+        assert(completer20.cell.getResult() === 7)
+        NoOutcome
+      case completer21.cell =>
+        assert(completer21.cell.getResult() === 9)
+        NoOutcome
+      case completer22.cell =>
+        assert(completer22.cell.getResult() === 10)
+        FinalOutcome(10)
+    })
+
+    assert(cell1.numTotalDependencies == 3)
+
+    cell1.onComplete {
+      case Success(x) =>
+        assert(x === 10)
+        latch1.countDown()
+      case Failure(e) =>
+        assert(false)
+        latch1.countDown()
+    }
+
+    completer20.putNext(7)
+    completer21.putNext(9)
+    completer22.putNext(10)
+    latch1.await()
+
+    assert(cell1.isComplete)
+
+    pool.onQuiescenceShutdown()
+  }
+
+  test("whenMultiSequenial: values passed to callback 2") {
+    val latch1 = new CountDownLatch(1)
+
+    implicit val pool = new HandlerPool
+    val completer1 = CellCompleter[StringIntKey, Int]("somekey")
+    val completer20 = CellCompleter[StringIntKey, Int]("someotherkey")
+    val completer21 = CellCompleter[StringIntKey, Int]("someotherkey")
+    val completer22 = CellCompleter[StringIntKey, Int]("someotherkey")
+
+    val cell1 = completer1.cell
+    cell1.whenMultiSequential(List(completer20.cell, completer22.cell, completer21.cell), {
+      case completer20.cell =>
+        assert(completer20.cell.getResult() === 7)
+        NoOutcome
+      case completer21.cell =>
+        assert(completer21.cell.getResult() === 9)
+        NoOutcome
+      case completer22.cell =>
+        assert(completer22.cell.getResult() === 10)
+        FinalOutcome(10)
+    })
+
+    assert(cell1.numTotalDependencies == 3)
+
+    cell1.onComplete {
+      case Success(x) =>
+        assert(x === 10)
+        latch1.countDown()
+      case Failure(e) =>
+        assert(false)
+        latch1.countDown()
+    }
+
+    completer20.putNext(7)
+    completer21.putNext(9)
+    completer22.putNext(10)
+    latch1.await()
+
+    assert(cell1.isComplete)
+
+    pool.onQuiescenceShutdown()
+  }
+
+  test("whenMulti: concurrent puts") {
+    for (i <- (1 to 1000).par) {
+      val latch1 = new CountDownLatch(1)
+
+      implicit val pool: HandlerPool = new HandlerPool
+      implicit val theLattice: PowerSetLattice[Int] = new PowerSetLattice[Int]
+      val theKey = new DefaultKey[Set[Int]]
+      val completer1 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer20 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer21 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer22 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer3 = CellCompleter[theKey.type, Set[Int]](theKey)
+
+      val cell1 = completer1.cell
+      cell1.whenMulti(List(completer20.cell, completer22.cell, completer21.cell), c => {
+        NextOutcome(c.getResult())
+      })
+
+      val cell3 = completer3.cell
+      cell1.whenNext(cell3, FinalOutcome(_))
+      cell3.whenNext(cell1, v => if (v.size == 3) FinalOutcome(Set(11)) else NoOutcome)
+
+      assert(cell1.numTotalDependencies == 4)
+
+      cell1.onComplete {
+        case Success(x) =>
+          assert(x === Set(7, 9, 10, 11))
+          latch1.countDown()
+        case Failure(e) =>
+          assert(false)
+          latch1.countDown()
+      }
+
+      pool.execute(() => completer20.putNext(Set(7)))
+      pool.execute(() => completer21.putNext(Set(9)))
+      pool.execute(() => completer22.putNext(Set(10)))
+
+      latch1.await()
+
+      assert(cell1.isComplete)
+
+      pool.onQuiescenceShutdown()
+    }
+  }
+
+  test("whenMultiSequential: concurrent puts") {
+    for (i <- (1 to 1000).par) {
+      val latch1 = new CountDownLatch(1)
+
+      implicit val pool: HandlerPool = new HandlerPool
+      implicit val theLattice: PowerSetLattice[Int] = new PowerSetLattice[Int]
+      val theKey = new DefaultKey[Set[Int]]
+      val completer1 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer20 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer21 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer22 = CellCompleter[theKey.type, Set[Int]](theKey)
+      val completer3 = CellCompleter[theKey.type, Set[Int]](theKey)
+
+      val cell1 = completer1.cell
+      cell1.whenMultiSequential(List(completer20.cell, completer22.cell, completer21.cell), c => {
+        NextOutcome(c.getResult())
+      })
+
+      val cell3 = completer3.cell
+      cell1.whenNextSequential(cell3, FinalOutcome(_))
+      cell3.whenNext(cell1, v => if (v.size == 3) FinalOutcome(Set(11)) else NoOutcome)
+
+      assert(cell1.numTotalDependencies == 4)
+
+      cell1.onComplete {
+        case Success(x) =>
+          assert(x === Set(7, 9, 10, 11))
+          latch1.countDown()
+        case Failure(e) =>
+          assert(false)
+          latch1.countDown()
+      }
+
+      pool.execute(() => completer20.putNext(Set(7)))
+      pool.execute(() => completer21.putNext(Set(9)))
+      pool.execute(() => completer22.putNext(Set(10)))
+
+      latch1.await()
+
+      assert(cell1.isComplete)
+
+      pool.onQuiescenceShutdown()
+    }
   }
 
   test("DefaultKey.resolve") {

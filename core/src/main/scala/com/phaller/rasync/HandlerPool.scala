@@ -149,7 +149,7 @@ class HandlerPool(
         .asInstanceOf[Iterable[Cell[K, V]]]
 
       if (registered.nonEmpty) {
-        val cSCCs = closedSCCs(registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
+        val cSCCs = closedSCCs[Cell[K, V]](registered, (cell: Cell[K, V]) => cell.totalCellDependencies)
         cSCCs.foreach(resolveCycle)
 
         // Wait again for quiescent state. It's possible that other tasks where scheduled while
@@ -230,7 +230,7 @@ class HandlerPool(
 
         // Find closed strongly connected component (cell)
         if (activeCells.nonEmpty) {
-          val cSCCs = closedSCCs(activeCells, (cell: Cell[K, V]) => cell.totalCellDependencies)
+          val cSCCs = closedSCCs[Cell[K, V]](activeCells, (cell: Cell[K, V]) => cell.totalCellDependencies)
           cSCCs.foreach(resolveCycle)
           resolvedCycles = cSCCs.nonEmpty
         }
