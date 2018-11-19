@@ -58,7 +58,7 @@ private[rasync] trait SingleDepCallbackRunnable[K <: Key[V], V] extends Callback
   // faster, both execute() and peekFor() can be removed.
   def execute(): Unit =
     if (otherCell.peekFor(dependentCompleter.cell, completeDep) != NoOutcome) // for COMPLETECallbackRunnables, one could use != FinalOutcome
-      try pool.execute(this)
+      try pool.execute(this, pool.schedulingStrategy.calcPriority(dependentCompleter.cell, otherCell))
       catch { case NonFatal(t) => pool reportFailure t }
 
   /** Call the callback and use update dependentCompleter according to the callback's result. */
