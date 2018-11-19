@@ -83,8 +83,8 @@ trait Cell[K <: Key[V], V] {
   def when(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
   def whenSequential(other: Cell[K, V], valueCallback: (V, Boolean) => Outcome[V]): Unit
 
-  def whenSequentialMulti(other: List[Cell[K, V]], valueCallback: () => Outcome[V]): Unit
-  def whenMulti(other: List[Cell[K, V]], valueCallback: () => Outcome[V]): Unit
+  def whenMulti(other: Seq[Cell[K, V]], valueCallback: Cell[K, V] => Outcome[V]): Unit
+  def whenMultiSequential(other: Seq[Cell[K, V]], valueCallback: Cell[K, V] => Outcome[V]): Unit
 
   def zipFinal(that: Cell[K, V]): Cell[DefaultKey[(V, V)], (V, V)]
 
@@ -484,14 +484,13 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
       }
     }
   }
-  override def whenSequentialMulti(other: List[Cell[K, V]], valueCallback: () => Outcome[V]): Unit =
-    whenMulti(other, valueCallback, true)
-
-  override def whenMulti(other: List[Cell[K, V]], valueCallback: () => Outcome[V]): Unit =
+  override def whenMulti(other: Seq[Cell[K, V]], valueCallback: Cell[K, V] => Outcome[V]): Unit =
     whenMulti(other, valueCallback, false)
 
+  override def whenMultiSequential(other: Seq[Cell[K, V]], valueCallback: Cell[K, V] => Outcome[V]): Unit =
+    whenMulti(other, valueCallback, true)
 
-  private def whenMulti(other: List[Cell[K, V]], valueCallback: () => Outcome[V], sequential: Boolean): Unit = {
+  private def whenMulti(other: Seq[Cell[K, V]], valueCallback: Cell[K, V] => Outcome[V], sequential: Boolean): Unit = {
     var success = false
     while (!success) { // repeat until compareAndSet succeeded (or the dependency is outdated)
       state.get() match {
@@ -1074,7 +1073,12 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           case _: IntermediateState[_, _] =>
             completeCallbacks.foreach { _.run() }
             nextCallbacks.foreach { _.run() }
-            combinedCallbacks.foreach { _.run() }
+
+            combinedCallbacks.foreach({
+              case callback: MultiCallbackRunnable[K, V] => callback.run(otherCell)
+              case callback: CallbackRunnable[_, _] => callback.run()
+            })
+
           case _: FinalState[K, V] =>
           /* We are final already, so we ignore all incoming information. */
         }

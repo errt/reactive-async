@@ -2,16 +2,16 @@ package com.phaller.rasync
 package test
 
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.{ CountDownLatch, TimeUnit }
 
 import com.phaller.rasync.lattice._
-import com.phaller.rasync.lattice.lattices.{NaturalNumberKey, NaturalNumberLattice}
+import com.phaller.rasync.lattice.lattices.{ NaturalNumberKey, NaturalNumberLattice }
 import com.phaller.rasync.test.lattice._
 import org.scalatest.FunSuite
 
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Promise}
-import scala.util.{Failure, Success}
+import scala.concurrent.{ Await, Promise }
+import scala.util.{ Failure, Success }
 
 class WhenMultiSuite extends FunSuite {
 
@@ -26,7 +26,7 @@ class WhenMultiSuite extends FunSuite {
     val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
 
     val cell1 = completer1.cell
-    cell1.whenMulti(List(completer2.cell), () => {
+    cell1.whenMulti(List(completer2.cell), _ => {
       Outcome(completer2.cell.getResult(), completer2.cell.isComplete) // complete, if completer2 is completed
     })
 
@@ -73,7 +73,7 @@ class WhenMultiSuite extends FunSuite {
     val completer2 = CellCompleter[StringIntKey, Int]("someotherkey")
 
     val cell1 = completer1.cell
-    cell1.whenSequentialMulti(List(completer2.cell), () => {
+    cell1.whenMultiSequential(List(completer2.cell), _ => {
       Outcome(completer2.cell.getResult(), completer2.cell.isComplete) // complete, if completer2 is completed
     })
 
@@ -111,14 +111,13 @@ class WhenMultiSuite extends FunSuite {
     pool.onQuiescenceShutdown()
   }
 
-
   test("DefaultKey.resolve") {
     implicit val pool = new HandlerPool
     val k = new DefaultKey[Int]
     val completer1 = CellCompleter[DefaultKey[Int], Int](k)
     val completer2 = CellCompleter[DefaultKey[Int], Int](k)
-    completer1.cell.whenMulti(List(completer2.cell), () => NextOutcome(completer2.cell.getResult()))
-    completer2.cell.whenMulti(List(completer1.cell), () => NextOutcome(completer1.cell.getResult()))
+    completer1.cell.whenMulti(List(completer2.cell), _ => NextOutcome(completer2.cell.getResult()))
+    completer2.cell.whenMulti(List(completer1.cell), _ => NextOutcome(completer1.cell.getResult()))
     completer1.putNext(5)
     Await.ready(pool.quiescentResolveCycles, 2.seconds)
     assert(completer1.cell.isComplete)
@@ -134,8 +133,8 @@ class WhenMultiSuite extends FunSuite {
     val completer2 = CellCompleter[StringIntKey, Int]("key2")
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.whenMulti(List(cell2), () => NoOutcome)
-    cell2.whenMulti(List(cell1), ()  => NoOutcome)
+    cell1.whenMulti(List(cell2), _ => NoOutcome)
+    cell2.whenMulti(List(cell1), _ => NoOutcome)
     val incompleteFut = pool.quiescentIncompleteCells
     val cells = Await.result(incompleteFut, 2.seconds)
     assert(cells.map(_.key).toList.toString == "List(key1, key2)")
@@ -147,13 +146,13 @@ class WhenMultiSuite extends FunSuite {
     val completer2 = CellCompleter[StringIntKey, Int]("key2")
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.whenMulti(List(cell2), () => NoOutcome)
-    cell2.whenMulti(List(cell1), ()  => NoOutcome)
+    cell1.whenMulti(List(cell2), _ => NoOutcome)
+    cell2.whenMulti(List(cell1), _ => NoOutcome)
     val qfut = pool.quiescentResolveCell
     Await.ready(qfut, 2.seconds)
     val incompleteFut = pool.quiescentIncompleteCells
     val cells = Await.result(incompleteFut, 2.seconds)
-    assert(cells.size == 0)
+    assert(cells.isEmpty)
   }
 
   test("whenComplete: cycle with additional incoming dep") {
@@ -186,8 +185,8 @@ class WhenMultiSuite extends FunSuite {
     val in = CellCompleter[TheKey.type, Value](TheKey)
 
     // let `cell1` and `cell2` form a cycle
-    cell1.whenMulti(List(cell2), () => NextOutcome(ShouldNotHappen))
-    cell2.whenMulti(List(cell1), ()  => NextOutcome(ShouldNotHappen))
+    cell1.whenMulti(List(cell2), _ => NextOutcome(ShouldNotHappen))
+    cell2.whenMulti(List(cell1), _ => NextOutcome(ShouldNotHappen))
 
     // the cycle is dependent on incoming information from `in`
     cell2.whenComplete(in.cell, v => { NextOutcome(ShouldNotHappen) })
@@ -215,7 +214,7 @@ class WhenMultiSuite extends FunSuite {
     val completer2 = CellCompleter[NaturalNumberKey.type, Int](NaturalNumberKey)(Updater.latticeToUpdater(new NaturalNumberLattice), pool)
 
     val cell1 = completer1.cell
-    cell1.whenSequentialMulti(List(completer2.cell), () => {
+    cell1.whenMultiSequential(List(completer2.cell), _ => {
       assert(runningCallbacks.incrementAndGet() == 1)
       val x = completer2.cell.getResult()
       Thread.`yield`()
@@ -277,7 +276,7 @@ class WhenMultiSuite extends FunSuite {
     for (i <- 1 to n) {
       val completer2 = CellCompleter[DefaultKey[Set[Int]], Set[Int]](theKey)(theUpdater, pool)
       val completer3 = CellCompleter[DefaultKey[Set[Int]], Set[Int]](theKey)(theUpdater, pool)
-      cell1.whenSequentialMulti(List(completer2.cell, completer3.cell), () => {
+      cell1.whenMultiSequential(List(completer2.cell, completer3.cell), _ => {
         count = count ++ Set(count.size)
         Thread.`yield`()
         try {
@@ -285,15 +284,15 @@ class WhenMultiSuite extends FunSuite {
         } catch {
           case _: InterruptedException => /* ignore */
         }
-        Outcome(count, count.size == 2*n)
+        Outcome(count, count.size == 2 * n)
       })
-      pool.execute(() => completer2.putNext(Set(2*i)))
-      pool.execute(() => completer3.putNext(Set(2*i+1)))
+      pool.execute(() => completer2.putNext(Set(2 * i)))
+      pool.execute(() => completer3.putNext(Set(2 * i + 1)))
     }
 
     latch.await()
 
-    assert(cell1.getResult().size == 2*n)
+    assert(cell1.getResult().size == 2 * n)
 
     pool.onQuiescenceShutdown()
   }
@@ -312,11 +311,11 @@ class WhenMultiSuite extends FunSuite {
     val cell3 = completer3.cell
     cell1.trigger()
 
-    cell1.whenSequentialMulti(List(cell2), () => {
+    cell1.whenMultiSequential(List(cell2), _ => {
       latch1.await() // wait for some puts/triggers
       FinalOutcome(10)
     })
-    cell1.whenSequentialMulti(List(cell3), () => NextOutcome(cell3.getResult()))
+    cell1.whenMultiSequential(List(cell3), _ => NextOutcome(cell3.getResult()))
 
     completer2.putFinal(3)
     completer3.putNext(2)
