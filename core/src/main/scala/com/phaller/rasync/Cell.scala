@@ -515,7 +515,7 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
               // Inform `other` that this cell depends on its updates.
               other.foreach(_.addCombinedDependentCell(this))
               // start calculations on `other` so that we eventually get its updates.
-              other.foreach(pool.triggerExecution)
+              other.foreach(c => pool.triggerExecution[K, V](c))
             }
           }
       }
