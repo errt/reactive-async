@@ -498,25 +498,27 @@ private class CellImpl[K <: Key[V], V](pool: HandlerPool, val key: K, updater: U
           // do not add dependency
           // in fact, do nothing
           success = true
-
         case raw: IntermediateState[_, _] => // not completed
           val current = raw.asInstanceOf[IntermediateState[K, V]]
-          val toRegister = other.diff[Cell[K, V]](current.combinedCallbacks.keys.toSeq)
-          if (toRegister.isEmpty)
-            success = true // another combined dependency has been registered already. Ignore the new (duplicate) one.
-          else {
-            val newCallback: MultiCallbackRunnable[K, V] =
-              if (sequential) new MultiSequentialCallbackRunnable(pool, this, other, valueCallback)
-              else new MultiConcurrentCallbackRunnable(pool, this, other, valueCallback)
 
-            val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells, current.nextCallbacks, current.combinedCallbacks ++ other.map((_, newCallback)))
-            if (state.compareAndSet(current, newState)) {
-              success = true
-              // Inform `other` that this cell depends on its updates.
-              other.foreach(_.addCombinedDependentCell(this))
-              // start calculations on `other` so that we eventually get its updates.
-              other.foreach(c => pool.triggerExecution[K, V](c))
-            }
+          val newCallback: MultiCallbackRunnable[K, V] =
+            if (sequential) new MultiSequentialCallbackRunnable(pool, this, valueCallback)
+            else new MultiConcurrentCallbackRunnable(pool, this, valueCallback)
+
+          // Calc new callbacks:
+          // (1) do not change existing callback mappings
+          // (2) add mappings for new keys
+          // → the following order guarantees this without calculation the diff explicitely.
+          // But: we do need the CAS even if old.keys = addedKeys
+          val newCombinedCallbacks = Map(other.map((_, newCallback)): _*) ++ current.combinedCallbacks
+
+          val newState = new IntermediateState(current.res, current.tasksActive, current.completeDependentCells, current.completeCallbacks, current.nextDependentCells, current.nextCallbacks, newCombinedCallbacks)
+          if (state.compareAndSet(current, newState)) {
+            success = true
+            // Inform `other` that this cell depends on its updates.
+            other.foreach(_.addCombinedDependentCell(this))
+            // start calculations on `other` so that we eventually get its updates.
+            other.foreach(c => pool.triggerExecution[K, V](c))
           }
       }
     }

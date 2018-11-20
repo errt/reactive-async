@@ -261,7 +261,6 @@ private[rasync] class CombinedSequentialCallbackRunnable[K <: Key[V], V](overrid
 private[rasync] abstract class MultiCallbackRunnable[K <: Key[V], V](
   override val pool: HandlerPool,
   override val dependentCompleter: CellCompleter[K, V], // needed to not call whenNext callback, if whenComplete callback exists.
-  val otherCells: Seq[Cell[K, V]],
   override val callback: Cell[K, V] => Outcome[V])
   extends CallbackRunnable[K, V] {
 
@@ -282,22 +281,29 @@ private[rasync] abstract class MultiCallbackRunnable[K <: Key[V], V](
       return ;
     }
 
-    callback(otherCell) match {
-      case NextOutcome(v) =>
-        dependentCompleter.putNext(v)
-      case FinalOutcome(v) =>
-        dependentCompleter.putFinal(v)
-      case _ => /* do nothing, the value of */
-    }
+    // poll the staged value from otherCell and remove it from the queue to not call the callback with the same argument twice.
+    otherCell.pollFor(dependentCompleter.cell, completeDep) match {
+      case Outcome(x, isFinal) =>
+        callback(otherCell) match {
+          case NextOutcome(v) =>
+            dependentCompleter.putNext(v)
+          case FinalOutcome(v) =>
+            dependentCompleter.putFinal(v)
+          case _ => /* do nothing, the value of */
+        }
 
-    dependentCompleter.cell.removeAllCallbacks(otherCells.filter(_.isComplete))
+        // If `otherCell` has been completed with `x`, the nextCallback can be removed
+        // ! MultiCallbacks are part of CombinedCallbacks !
+        if (isFinal) dependentCompleter.cell.removeCombinedCallbacks(otherCell)
+      case _ => /* No new value is present. */
+    }
   }
 
   override def run(): Unit = ???
 }
 
-private[rasync] class MultiConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCells: Seq[Cell[K, V]], override val callback: Cell[K, V] => Outcome[V])
-  extends MultiCallbackRunnable[K, V](pool, dependentCompleter, otherCells, callback) with ConcurrentCallbackRunnable[K, V]
+private[rasync] class MultiConcurrentCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val callback: Cell[K, V] => Outcome[V])
+  extends MultiCallbackRunnable[K, V](pool, dependentCompleter, callback) with ConcurrentCallbackRunnable[K, V]
 
-private[rasync] class MultiSequentialCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val otherCells: Seq[Cell[K, V]], override val callback: Cell[K, V] => Outcome[V])
-  extends MultiCallbackRunnable[K, V](pool, dependentCompleter, otherCells, callback) with SequentialCallbackRunnable[K, V]
+private[rasync] class MultiSequentialCallbackRunnable[K <: Key[V], V](override val pool: HandlerPool, override val dependentCompleter: CellCompleter[K, V], override val callback: Cell[K, V] => Outcome[V])
+  extends MultiCallbackRunnable[K, V](pool, dependentCompleter, callback) with SequentialCallbackRunnable[K, V]
