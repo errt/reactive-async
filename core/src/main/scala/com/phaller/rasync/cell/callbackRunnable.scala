@@ -3,6 +3,9 @@ package cell
 
 import java.util.concurrent.atomic.AtomicReference
 
+import pool.HandlerPool
+
+import scala.annotation.tailrec
 import scala.concurrent.OnCompleteRunnable
 import scala.util.{ Failure, Success, Try }
 
@@ -17,18 +20,33 @@ import scala.util.{ Failure, Success, Try }
  * Call execute() to add the callback to the given HandlerPool.
  */
 private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnable {
+  val pool: HandlerPool[V]
+
   val dependentCompleter: CellCompleter[V]
 
   /** The cell that triggers the callback. */
-  val otherCell: Cell[V]
+  val dependees: Iterable[Cell[V]]
 
   protected val sequential: Boolean
 
   /** The callback to be called. It retrieves an updated value of otherCell and returns an Outcome for dependentCompleter. */
-  val callback: (Cell[V], Try[ValueOutcome[V]]) => Outcome[V]
+  protected val callback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V]
 
-  // AtomicBoolean does not offer getAndAccumulate()
-  private val completed = new AtomicReference[Boolean](false)
+  private val updatedDependees = new AtomicReference[Set[Cell[V]]](Set.empty)
+
+  @tailrec
+  final def addUpdate(other: Cell[V]): Unit = {
+    val oldUpdatedDependees = updatedDependees.get
+    val newUpdatedDependees = oldUpdatedDependees + other
+    if (updatedDependees.compareAndSet(oldUpdatedDependees, newUpdatedDependees)) {
+      // The first incoming update (since the last execution) starts this runnable.
+      // Other cells might still be added to updatedDependees concurrently, the runnable
+      // will collect all updates and forward them altogether.
+      if (oldUpdatedDependees.isEmpty)
+        pool.execute(this, pool.schedulingStrategy.calcPriority(dependentCompleter.cell, other))
+    } else addUpdate(other) // retry
+    // TODO Do we have to avoid propagations after final propagations?
+  }
 
   /** Call the callback and use update dependentCompleter according to the callback's result. */
   def run(): Unit = {
@@ -43,47 +61,40 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
 
   protected def callCallback(): Unit = {
     if (!dependentCompleter.cell.isComplete) {
-      val dependerState = otherCell.getState()
 
-      // (1) we do not call the callback any more, if it has been
-      // called with a final value before
-      // (2) for final value: "lock" this callback
-      val hadBeenCompleted = completed.getAndAccumulate(dependerState._2, _ || _)
-      if (!hadBeenCompleted)
-        try {
-          val propagatedValue: Try[ValueOutcome[V]] =
-            dependerState match {
-              case (Success(v), isFinal) =>
-                Success(Outcome(v, isFinal))
-              case (Failure(e), _) => Failure(e)
-            }
-          val depRemoved = // see below for depRemoved
-            callback(otherCell, propagatedValue) match {
-              case NextOutcome(v) =>
-                dependentCompleter.putNext(v)
-                false
-              case FinalOutcome(v) =>
-                dependentCompleter.putFinal(v)
-                dependentCompleter.cell.removeDependeeCell(otherCell)
-                true
-              case FreezeOutcome =>
-                dependentCompleter.freeze()
-                dependentCompleter.cell.removeDependeeCell(otherCell)
-                true
-              case NoOutcome => false /* do nothing */
-            }
-          // if the dependency has not been removed yet,
-          // we can remove it, if a FinalOutcome has been propagted
-          // or a Failuare has been propagated, i.e. the dependee had been completed
-          if (!depRemoved && propagatedValue.map(_.isInstanceOf[FinalOutcome[_]]).getOrElse(true)) {
-            dependentCompleter.cell.removeDependeeCell(otherCell)
+      try {
+        // remove all updates form the list of updates that need to be handled – they will now be handled
+        val dependees = updatedDependees.getAndSet(Set.empty)
+        val propagations = dependees.map(c => (c, c.getState()))
+
+        val depRemoved = // see below for depRemoved
+          callback(propagations) match {
+            case NextOutcome(v) =>
+              dependentCompleter.putNext(v)
+              false
+            case FinalOutcome(v) =>
+              dependentCompleter.putFinal(v)
+              true
+            case FreezeOutcome =>
+              dependentCompleter.freeze()
+              true
+            case NoOutcome => false /* do nothing */
           }
-        } catch {
-          // An exception thrown in a callback is stored as  the final value for the depender
-          case e: Exception =>
-            dependentCompleter.putFailure(Failure(e))
+        // if the dependency has not been removed yet,
+        // we can remove it, if a FinalOutcome has been propagted
+        // or a Failuare has been propagated, i.e. the dependee had been completed
+        if (!depRemoved) {
+          val toRemove = propagations.filter({
+            case (_, Success(NextOutcome(_))) => false
+            case _ => true
+          }).map(_._1)
+          dependentCompleter.cell.removeDependeeCells(toRemove)
         }
-
+      } catch {
+        // An exception thrown in a callback is stored as  the final value for the depender
+        case e: Exception =>
+          dependentCompleter.putFailure(Failure(e))
+      }
     }
   }
 }
@@ -92,7 +103,7 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
  * Run a callback concurrently, if a value in a cell changes.
  * Call execute() to add the callback to the given HandlerPool.
  */
-private[rasync] class ConcurrentCallbackRunnable[V](override val dependentCompleter: CellCompleter[V], override val otherCell: Cell[V], override val callback: (Cell[V], Try[ValueOutcome[V]]) => Outcome[V]) extends CallbackRunnable[V] {
+private[rasync] class ConcurrentCallbackRunnable[V](override val pool: HandlerPool[V], override val dependentCompleter: CellCompleter[V], override val dependees: Iterable[Cell[V]], override val callback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V]) extends CallbackRunnable[V] {
   override protected final val sequential: Boolean = false
 }
 
@@ -100,6 +111,6 @@ private[rasync] class ConcurrentCallbackRunnable[V](override val dependentComple
  * Run a callback sequentially (for a dependent cell), if a value in another cell changes.
  * Call execute() to add the callback to the given HandlerPool.
  */
-private[rasync] class SequentialCallbackRunnable[V](override val dependentCompleter: CellCompleter[V], override val otherCell: Cell[V], override val callback: (Cell[V], Try[ValueOutcome[V]]) => Outcome[V]) extends CallbackRunnable[V] {
+private[rasync] class SequentialCallbackRunnable[V](override val pool: HandlerPool[V], override val dependentCompleter: CellCompleter[V], override val dependees: Iterable[Cell[V]], override val callback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V]) extends CallbackRunnable[V] {
   override protected final val sequential: Boolean = true
 }

@@ -20,7 +20,7 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
     val latch = new CountDownLatch(1)
     val random = new scala.util.Random()
 
-    implicit val pool = new HandlerPool[Int](NaturalNumberKey)
+    implicit val pool: HandlerPool[Int] = new HandlerPool[Int](NaturalNumberKey)
     val completer1 = mkCompleter[Int]
 
     val cell1 = completer1.cell
@@ -28,7 +28,8 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
       val tmpCompleter = mkCompleter[Int]
 
       // let cell1 depend on the predecessor tmpCompleter
-      cell1.when((_, x) => {
+      cell1.when(it => {
+        val x = it.head._2
         assert(runningCallbacks.incrementAndGet() == 1)
         Thread.`yield`()
         try {
@@ -71,13 +72,13 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
 
     }
 
-    implicit val theUpdater = Updater.latticeToUpdater(new PowerSetLattice[Int])
+    implicit val theUpdater: Updater[Set[Int]] = Updater.latticeToUpdater(new PowerSetLattice[Int])
 
     val latch = new CountDownLatch(1)
     val random = new scala.util.Random()
 
     val theKey = new DefaultKey[Set[Int]]
-    implicit val pool = new HandlerPool[Set[Int]](theKey)
+    implicit val pool: HandlerPool[Set[Int]] = new HandlerPool[Set[Int]](theKey)
     val completer1 = mkCompleter[Set[Int]]
     val cell1 = completer1.cell
 
@@ -87,7 +88,7 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
 
     for (i <- 1 to n) {
       val completer2 = mkCompleter[Set[Int]]
-      cell1.when((_, _) => {
+      cell1.when(_ => {
         count = count ++ Set(count.size)
         Thread.`yield`()
         try {

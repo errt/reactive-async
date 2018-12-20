@@ -47,8 +47,8 @@ class LazySuite extends FunSuite {
     })
 
     cell2 = pool.mkCell(_ => {
-      cell2.when((_, x) => {
-        if (x.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(3)
+      cell2.when(it => {
+        if (it.head._2.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(3)
         else NoOutcome
       }, cell1)
       NextOutcome(2)
@@ -109,8 +109,8 @@ class LazySuite extends FunSuite {
     var cell2: Cell[Int] = null
 
     cell1 = pool.mkCell(_ => {
-      cell1.when((_, x) => {
-        if (x.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(3)
+      cell1.when(it => {
+        if (it.head._2.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(3)
         else NoOutcome
 
       }, cell2)
@@ -118,8 +118,8 @@ class LazySuite extends FunSuite {
     })
 
     cell2 = pool.mkCell(_ => {
-      cell2.when((_, x) => {
-        if (x.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(3)
+      cell2.when(it => {
+        if (it.head._2.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(3)
         else NoOutcome
       }, cell1)
       NextOutcome(2)
@@ -158,17 +158,17 @@ class LazySuite extends FunSuite {
     var cell3: Cell[Int] = null
 
     cell1 = pool.mkCell(_ => {
-      cell1.when((_, _) => NextOutcome(-1), cell2)
+      cell1.when(_ => NextOutcome(-1), cell2)
       NextOutcome(101)
     })
 
     cell2 = pool.mkCell(_ => {
-      cell2.when((_, _) => NextOutcome(-1), cell1)
+      cell2.when(_ => NextOutcome(-1), cell1)
       NextOutcome(102)
     })
 
     cell3 = pool.mkCell(_ => {
-      cell3.when((_, _) => FinalOutcome(103), cell1)
+      cell3.when(_ => FinalOutcome(103), cell1)
       NextOutcome(-1)
     })
 
@@ -209,14 +209,14 @@ class LazySuite extends FunSuite {
     var cell3: Cell[Int] = null
 
     cell1 = pool.mkCell(c => {
-      c.when((_, _) => {
+      c.when(_ => {
         NextOutcome(-111)
       }, cell2)
       NextOutcome(11)
     })
 
     cell2 = pool.mkCell(c => {
-      c.when((_, _) => {
+      c.when(_ => {
         NextOutcome(-222)
       }, cell1)
       NextOutcome(22)
@@ -237,7 +237,7 @@ class LazySuite extends FunSuite {
     latch2.await()
 
     cell3 = pool.mkCell(c => {
-      c.when((_, _) => {
+      c.when(_ => {
         FinalOutcome(333)
       }, cell1)
       NextOutcome(-3)
@@ -259,11 +259,11 @@ class LazySuite extends FunSuite {
     var c1: Cell[Int] = null
     var c2: Cell[Int] = null
     c1 = pool.mkCell(_ => {
-      c1.when((_, _) => FinalOutcome(-2), c2)
+      c1.when(_ => FinalOutcome(-2), c2)
       FinalOutcome(-1)
     })
     c2 = pool.mkCell(_ => {
-      c2.when((_, _) => FinalOutcome(-2), c1)
+      c2.when(_ => FinalOutcome(-2), c1)
       FinalOutcome(-1)
     })
 
@@ -307,3 +307,4 @@ class LazySuite extends FunSuite {
     pool.shutdown()
   }
 }
+

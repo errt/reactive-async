@@ -1,15 +1,25 @@
 package com.phaller.rasync
 package test
 
-import cell.{ CellCompleter, FinalOutcome, NoOutcome }
+import cell._
 import com.phaller.rasync.lattice.Updater
 import org.scalatest.FunSuite
 import pool.HandlerPool
 import lattice.IntUpdater
 
+import scala.util.Try
+
 class InternalBaseSuite extends FunSuite {
 
   implicit val stringIntUpdater: Updater[Int] = new IntUpdater
+
+  def if10thenFinal20(updates: Iterable[(Cell[Int], Try[ValueOutcome[Int]])]): Outcome[Int] =
+    ifXthenFinalY(10, 20)(updates)
+
+  def ifXthenFinalY(x: Int, y: Int)(upd: Iterable[(Cell[Int], Try[ValueOutcome[Int]])]): Outcome[Int] = {
+    val c = upd.head._2
+    if (c.get.value == x) FinalOutcome(y) else NoOutcome
+  }
 
   test("cellDependencies: By adding dependencies") {
     implicit val pool = new HandlerPool[Int]
@@ -17,8 +27,8 @@ class InternalBaseSuite extends FunSuite {
     val completer2 = CellCompleter[Int]()
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.when((_, x) => if (x.get.value == 0) FinalOutcome(0) else NoOutcome, cell2)
-    cell1.when((_, x) => if (x.get.value == 0) FinalOutcome(0) else NoOutcome, cell2)
+    cell1.when(if10thenFinal20, cell2)
+    cell1.when(if10thenFinal20, cell2)
 
     assert(cell1.numDependencies == 1)
     assert(cell2.numDependencies == 0)
@@ -30,8 +40,8 @@ class InternalBaseSuite extends FunSuite {
     val completer2 = CellCompleter[Int]()
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.when((_, x) => if (x.get.value == 0) FinalOutcome(0) else NoOutcome, cell2)
-    cell1.when((_, x) => if (x.get.value == 0) FinalOutcome(0) else NoOutcome, cell2)
+    cell1.when(if10thenFinal20, cell2)
+    cell1.when(if10thenFinal20, cell2)
 
     completer1.putFinal(0)
 

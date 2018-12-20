@@ -22,6 +22,11 @@ import scala.util.{ Failure, Success, Try }
  * For the mixedcase, see MixedKeyResolutionsuite
  */
 abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
+  def forwardAsNext(upd: Iterable[(Cell[Int], Try[ValueOutcome[Int]])]): Outcome[Int] = {
+    val c = upd.head._2
+    NextOutcome(c.get.value)
+  }
+
   implicit val intUpdater: Updater[Int] = new IntUpdater
 
   test("DefaultKey.resolve") {
@@ -29,8 +34,8 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
     implicit val pool = new HandlerPool[Int](k)
     val completer1 = mkCompleter[Int]
     val completer2 = mkCompleter[Int]
-    completer1.cell.when((_, x) => NextOutcome(x.get.value), completer2.cell)
-    completer2.cell.when((_, x) => NextOutcome(x.get.value), completer1.cell)
+    completer1.cell.when(forwardAsNext, completer2.cell)
+    completer2.cell.when(forwardAsNext, completer1.cell)
     completer1.putNext(5)
     Await.ready(pool.quiescentResolveCell, 2.seconds)
     assert(completer1.cell.isComplete)
@@ -82,7 +87,7 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
     completer4.putNext(-1)
 
     // create a cSCC, assert that none of the callbacks get called again.
-    def c(cell: Cell[Int], v: Try[ValueOutcome[Int]]): Outcome[Int] = v.get match {
+    def c(upd: Iterable[(Cell[Int], Try[ValueOutcome[Int]])]): Outcome[Int] = upd.head._2.get match {
       case FinalOutcome(_) =>
         NoOutcome
       case NextOutcome(-1) =>
@@ -138,7 +143,7 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
     completer4.putNext(-1)
 
     // create a cSCC, assert that none of the callbacks get called again.
-    def c(cell: Cell[Int], v: Try[ValueOutcome[Int]]): Outcome[Int] = v.get match {
+    def c(upd: Iterable[(Cell[Int], Try[ValueOutcome[Int]])]): Outcome[Int] = upd.head._2.get match {
       case FinalOutcome(_) =>
         NoOutcome
       case NextOutcome(-1) =>
@@ -191,8 +196,8 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
       val cell1 = completer1.cell
       val cell2 = completer2.cell
 
-      cell1.when((_, _) => NextOutcome(ShouldNotHappen), cell2)
-      cell2.when((_, _) => NextOutcome(ShouldNotHappen), cell1)
+      cell1.when(_ => NextOutcome(ShouldNotHappen), cell2)
+      cell2.when(_ => NextOutcome(ShouldNotHappen), cell1)
 
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
@@ -229,8 +234,8 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
       val cell1 = completer1.cell
       val cell2 = completer2.cell
 
-      cell1.when((_, v) => NextOutcome(ShouldNotHappen), cell2)
-      cell2.when((_, v) => NextOutcome(ShouldNotHappen), cell1)
+      cell1.when(_ => NextOutcome(ShouldNotHappen), cell2)
+      cell2.when(_ => NextOutcome(ShouldNotHappen), cell1)
 
       val fut = pool.quiescentResolveCell
       Await.ready(fut, 1.minutes)
@@ -272,11 +277,11 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
     val out = mkCompleter[Value]
 
     // let `cell1` and `cell2` form a cycle
-    cell1.when((_, _) => NextOutcome(ShouldNotHappen), cell2)
-    cell2.when((_, _) => NextOutcome(ShouldNotHappen), cell1)
+    cell1.when(_ => NextOutcome(ShouldNotHappen), cell2)
+    cell2.when(_ => NextOutcome(ShouldNotHappen), cell1)
 
     // the cycle is dependent on incoming information from `out`
-    cell2.when((_, _) => NextOutcome(ShouldNotHappen), out.cell)
+    cell2.when(_ => NextOutcome(ShouldNotHappen), out.cell)
 
     // resolve the independent cell `out` and the cycle
     val fut = pool.quiescentResolveCell
@@ -318,10 +323,10 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
     val cell2 = completer2.cell
     val in = mkCompleter[Value]
     in.putNext(Dummy)
-    cell1.when((_, _) => NextOutcome(ShouldNotHappen), cell2)
-    cell2.when((_, _) => NextOutcome(ShouldNotHappen), cell1)
+    cell1.when(_ => NextOutcome(ShouldNotHappen), cell2)
+    cell2.when(_ => NextOutcome(ShouldNotHappen), cell1)
     in.putNext(ShouldNotHappen)
-    in.cell.when((_, _) => FinalOutcome(OK), cell1)
+    in.cell.when(_ => FinalOutcome(OK), cell1)
 
     val fut = pool.quiescentResolveCell
     Await.ready(fut, 1.minutes)

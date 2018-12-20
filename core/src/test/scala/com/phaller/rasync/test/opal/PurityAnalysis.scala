@@ -8,11 +8,10 @@ import com.phaller.rasync.cell._
 import com.phaller.rasync.lattice.Updater
 import com.phaller.rasync.pool.HandlerPool
 
-import scala.collection.JavaConverters._
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import org.opalj.Success
-import org.opalj.br.{ ClassFile, Method, MethodWithBody, PC }
+import org.opalj.br.{ ClassFile, Method }
 import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project }
 import org.opalj.br.instructions.GETFIELD
 import org.opalj.br.instructions.GETSTATIC
@@ -211,7 +210,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     }
   }
 
-  def c(cell: Cell[Purity], v: Try[ValueOutcome[Purity]]): Outcome[Purity] = {
-    if (v.get.value == Impure) FinalOutcome(Impure) else NoOutcome
+  def c(v: Iterable[(Cell[Purity], Try[ValueOutcome[Purity]])]): Outcome[Purity] = {
+    if (v.head._2.get.value == Impure) FinalOutcome(Impure) else NoOutcome
   }
 }

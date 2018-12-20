@@ -3,11 +3,10 @@ package test
 
 import org.scalatest.FunSuite
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
-import java.util.concurrent.atomic.AtomicInteger
 
-import com.phaller.rasync.cell.{ Cell, FinalOutcome, NextOutcome, NoOutcome }
+import com.phaller.rasync.cell._
 
-import scala.util.{ Failure, Success }
+import scala.util.{ Failure, Success, Try }
 import scala.concurrent.{ Await, Promise }
 import scala.concurrent.duration._
 import com.phaller.rasync.lattice._
@@ -18,6 +17,14 @@ import com.phaller.rasync.test.lattice.{ IntUpdater, StringIntKey }
 abstract class BaseSuite extends FunSuite with CompleterFactory {
 
   implicit val intUpdater: Updater[Int] = new IntUpdater
+
+  def if10thenFinal20(updates: Iterable[(Cell[Int], Try[ValueOutcome[Int]])]): Outcome[Int] =
+    ifXthenFinalY(10, 20)(updates)
+
+  def ifXthenFinalY(x: Int, y: Int)(upd: Iterable[(Cell[Int], Try[ValueOutcome[Int]])]): Outcome[Int] = {
+    val c = upd.head._2
+    if (c.get.value == x) FinalOutcome(y) else NoOutcome
+  }
 
   test("putFinal") {
     val latch = new CountDownLatch(1)
@@ -83,7 +90,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     cell1.onComplete {
       case Success(v) =>
@@ -109,7 +116,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     cell1.onComplete {
       case Success(v) =>
@@ -135,11 +142,11 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     completer2.putFinal(9)
 
-    cell1.waitUntilNoDeps()
+    cell1.waitUntilNoDeps(2, TimeUnit.SECONDS)
 
     assert(cell1.numDependencies == 0)
 
@@ -156,8 +163,8 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer4 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
-    cell1.when((_, x) => if (x.get.value == 20) FinalOutcome(30) else NoOutcome, completer2.cell, completer3.cell) // cell2 should be ignored
+    cell1.when(if10thenFinal20, completer2.cell)
+    cell1.when(ifXthenFinalY(20, 30), completer2.cell, completer3.cell) // cell2 should be ignored
 
     assert(cell1.numDependencies == 2)
 
@@ -174,12 +181,12 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer4 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
-    cell1.when((_, x) => if (x.get.value == 20) FinalOutcome(30) else NoOutcome, completer2.cell) // should be ignored
+    cell1.when(if10thenFinal20, completer2.cell)
+    cell1.when(ifXthenFinalY(20, 30), completer2.cell) // should be ignored
 
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer3.cell, completer4.cell)
-    cell1.when((_, x) => if (x.get.value == 20) FinalOutcome(30) else NoOutcome, completer3.cell) // should be ignored
-    cell1.when((_, x) => if (x.get.value == 20) FinalOutcome(30) else NoOutcome, completer4.cell) // should be ignored
+    cell1.when(if10thenFinal20, completer3.cell, completer4.cell)
+    cell1.when(ifXthenFinalY(20, 30), completer3.cell) // should be ignored
+    cell1.when(ifXthenFinalY(20, 30), completer4.cell) // should be ignored
 
     assert(cell1.numDependencies == 3)
 
@@ -193,7 +200,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer1 = mkCompleter[Int]
     val completer2 = mkCompleter[Int]
 
-    completer1.cell.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
+    completer1.cell.when(if10thenFinal20, completer2.cell)
 
     completer1.cell.onComplete(_ => latch.countDown())
 
@@ -242,7 +249,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     assert(cell1.numDependencies == 1)
     assert(completer2.cell.numDependentCells == 1)
@@ -273,7 +280,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
     assert(cell1.numDependencies == 1)
 
     cell1.onNext {
@@ -298,7 +305,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => if (x.get.value == 10) FinalOutcome(20) else NoOutcome, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     completer2.putFinal(10)
 
@@ -314,7 +321,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer1 = mkCompleter[Immutability]
     val completer2 = mkCompleter[Immutability]
 
-    completer1.cell.when((_, t) => t match {
+    completer1.cell.when(_.head._2 match {
       case Success(NextOutcome(Mutable)) => NextOutcome(Mutable)
       case _ => NoOutcome
     }, completer2.cell)
@@ -339,7 +346,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
       pool.execute(() => {
         val completer2 = mkCompleter[Immutability]
         val completer3 = mkCompleter[Immutability]
-        completer1.cell.when((_, _) => NextOutcome(Mutable), completer2.cell, completer3.cell)
+        completer1.cell.when(_ => NextOutcome(Mutable), completer2.cell, completer3.cell)
         latch.countDown()
       })
     }
@@ -362,7 +369,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
       val cell1 = completer1.cell
       cell1.trigger()
 
-      pool.execute(() => cell1.when((_, _) => {
+      pool.execute(() => cell1.when(_ => {
         NoOutcome
       }, completer2.cell))
 
@@ -381,10 +388,10 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
   test("when: One cell with several dependencies on the same cell concurrency test") {
     implicit val pool = new HandlerPool[Immutability]()
 
-    for (i <- 1 to 1000) {
+    for (_ <- 1 to 1000) {
       val completer1 = mkCompleter[Immutability]
       val completer2 = mkCompleter[Immutability]
-      completer1.cell.when((_, x) => x.get.value match {
+      completer1.cell.when(it => it.head._2.get.value match {
         case Immutable | ConditionallyImmutable => NoOutcome
         case Mutable => NextOutcome(Mutable)
       }, completer2.cell)
@@ -414,8 +421,8 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
 
       val cell1 = completer1.cell
 
-      pool.execute(() => cell1.when((_, x) => {
-        if (x.get.value == Mutable) NextOutcome(Mutable)
+      pool.execute(() => cell1.when(it => {
+        if (it.head._2.get.value == Mutable) NextOutcome(Mutable)
         else NoOutcome
       }, completer2.cell))
       pool.execute(() => completer2.putNext(Mutable))
@@ -438,10 +445,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => {
-      if (x.get.value == 10) FinalOutcome(20)
-      else NoOutcome
-    }, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     cell1.onComplete {
       case Success(v) =>
@@ -477,10 +481,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => {
-      if (x.get.value == 10) FinalOutcome(20)
-      else NoOutcome
-    }, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     cell1.onComplete {
       case Success(x) =>
@@ -498,7 +499,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
 
     pool.onQuiescenceShutdown()
   }
-  //
+
   test("when: complete dependent cell, dependency 2") {
     val latch1 = new CountDownLatch(1)
     val latch2 = new CountDownLatch(1)
@@ -508,10 +509,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => {
-      if (x.get.value == 10) FinalOutcome(20)
-      else NoOutcome
-    }, completer2.cell)
+    cell1.when(if10thenFinal20, completer2.cell)
 
     cell1.onNext {
       case Success(x) =>
@@ -549,9 +547,12 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
 
     val cell1 = completer1.cell
-    cell1.when((_, x) => x.get match {
-      case FinalOutcome(_) => x.get // complete, if completer2 is completed
-      case _ => NoOutcome
+    cell1.when(it => {
+      val x = it.head._2
+      x.get match {
+        case FinalOutcome(_) => x.get // complete, if completer2 is completed
+        case _ => NoOutcome
+      }
     }, completer2.cell)
 
     assert(cell1.numDependencies == 1)
@@ -685,8 +686,8 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.when((_, x) => if (x.get.value == 1) FinalOutcome(1) else NoOutcome, cell2)
-    cell2.when((_, x) => if (x.get.value == 1) FinalOutcome(1) else NoOutcome, cell1)
+    cell1.when(if10thenFinal20, cell2)
+    cell2.when(if10thenFinal20, cell1)
     val incompleteFut = pool.quiescentIncompleteCells
     val cells = Await.result(incompleteFut, 2.seconds)
     assert(cells.size == 2)
@@ -698,8 +699,8 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.when((_, _) => NoOutcome, cell2)
-    cell2.when((_, _) => NoOutcome, cell1)
+    cell1.when(_ => NoOutcome, cell2)
+    cell2.when(_ => NoOutcome, cell1)
     val qfut = pool.quiescentResolveCell
     Await.ready(qfut, 2.seconds)
     val incompleteFut = pool.quiescentIncompleteCells
@@ -801,11 +802,11 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val completer2 = mkCompleter[Int]
     val completer3 = mkCompleter[Int]
 
-    completer2.cell.when((_, _) => {
+    completer2.cell.when(_ => {
       FinalOutcome(10)
     }, completer1.cell)
-    completer3.cell.when((_, v) => {
-      if (v.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(10)
+    completer3.cell.when(it => {
+      if (it.head._2.get.isInstanceOf[FinalOutcome[_]]) FinalOutcome(10)
       else NoOutcome
     }, completer1.cell)
 
@@ -872,8 +873,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
 
     pool.onQuiescenceShutdown()
   }
-  //
-  //
+
   test("when: called at most once with FinalOutcome") {
     implicit val intMaxLattice: Lattice[Int] = new Lattice[Int] {
       override def join(x: Int, y: Int): Int = Math.max(x, y)
@@ -888,8 +888,8 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
       val completer1 = mkCompleter[Int]
       val completer2 = mkCompleter[Int]
       var called = 0
-      completer2.cell.when((_, x) => {
-        if (x.get.isInstanceOf[FinalOutcome[_]]) {
+      completer2.cell.when(it => {
+        if (it.head._2.get.isInstanceOf[FinalOutcome[_]]) {
           assert(called === 0)
           called += 1
           latch.countDown()
@@ -936,7 +936,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val cell2 = completer2.cell
     cell1.trigger()
 
-    cell1.when((_, _) => {
+    cell1.when(_ => {
       latch1.await() // wait for some puts/triggers
       FinalOutcome(n)
     }, cell2)
@@ -982,16 +982,16 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val cell20 = completer20.cell
 
     completer2.putNext(1)
-    cell2.when((_, x) => {
-      if (x.get.value == 42) {
+    cell2.when(it => {
+      if (it.head._2.get.value == 42) {
         completer2.putFinal(43)
       }
       NoOutcome
     }, cell1)
 
     completer20.putNext(1)
-    cell20.when((_, x) => {
-      if (x.get.value == 10) {
+    cell20.when(it => {
+      if (it.head._2.get.value == 10) {
         completer20.putFinal(43)
       }
       NoOutcome
@@ -1000,7 +1000,7 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     completer1.putNext(10)
     completer10.putNext(10)
 
-    cell1.when((_, _) => {
+    cell1.when(_ => {
       NoOutcome
     }, cell1)
 
@@ -1025,14 +1025,14 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val cell2 = completer2.cell
     cell2.trigger()
 
-    cell1.when((_, _) => {
+    cell1.when(_ => {
       Thread.sleep(200)
       NoOutcome
     }, cell1)
 
-    cell2.when((_, x) => {
+    cell2.when(it => {
       Thread.sleep(200)
-      FinalOutcome(x.get.value * 2)
+      FinalOutcome(it.head._2.get.value * 2)
     }, cell1)
 
     val fut = pool.quiescentResolveCell
@@ -1051,9 +1051,9 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
     val cell1 = completer1.cell
     val cell2 = completer2.cell
 
-    cell1.when((_, x) => {
+    cell1.when(it => {
       Thread.sleep(200)
-      FinalOutcome(x.get.value * 2)
+      FinalOutcome(it.head._2.get.value * 2)
     }, cell2)
 
     val fut = pool.quiescentResolveCell
@@ -1074,24 +1074,6 @@ abstract class BaseSuite extends FunSuite with CompleterFactory {
       cells.map(cell ⇒ (cell, 43))
     }
   }
-
-  test("cell isADependee") {
-    implicit val pool = new HandlerPool[Int](new RecursiveQuiescentTestKey)
-    val completer1 = mkCompleter[Int]
-    val completer2 = mkCompleter[Int]
-    val cell1 = completer1.cell
-    val cell2 = completer2.cell
-
-    cell1.when((_, _) => {
-      FinalOutcome(1)
-    }, cell2)
-
-    assert(cell2.isADependee())
-    assert(!cell1.isADependee())
-
-    pool.shutdown()
-  }
-
 }
 
 class ConcurrentBaseSuite extends BaseSuite with ConcurrentCompleterFactory
