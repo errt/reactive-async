@@ -244,7 +244,7 @@ class HandlerPool(
 
         // Find closed strongly connected component (cell)
         if (activeCells.nonEmpty) {
-          val cSCCs = closedSCCs(activeCells, (cell: Cell[K, V]) => cell.totalCellDependencies)
+          val cSCCs = closedSCCs[Cell[K, V]](activeCells, (cell: Cell[K, V]) => cell.totalCellDependencies)
           cSCCs.foreach(resolveCycle)
           resolvedCycles = cSCCs.nonEmpty
         }
