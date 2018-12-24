@@ -4,8 +4,7 @@ package com.phaller.rasync.test.opal.ifds
 import java.util.concurrent.ConcurrentHashMap
 
 import com.phaller.rasync.lattice.{Key, Lattice}
-import com.phaller.rasync.cell._
-import com.phaller.rasync.pool.{HandlerPool, SchedulingStrategy}
+import com.phaller.rasync._
 
 import scala.collection.{Set => SomeSet}
 import org.opalj.br.DeclaredMethod
@@ -52,7 +51,6 @@ import scala.util.Try
   * @tparam DataFlowFact The type of flow facts the concrete analysis wants to track
   *
   * @author Dominik Helm
-  * @author Jan Kölzer (adaption to Reactive Async)
   */
 // The `scheduling` is only for testing. In production, one would create a HandlerPool with the best scheduling for IFDS
 abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.getRuntime.availableProcessors(), scheduling: SchedulingStrategy) extends FPCFAnalysis {
@@ -61,12 +59,12 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
 
   // [p. ackland] "Both resolve and fallback return the empty set for each cell because on quiescence we know that no more propagations will be made and the cell can be completed."
   object TheKey extends Key[IFDSProperty[DataFlowFact]] {
-    override def resolve(cells: Iterable[Cell[IFDSProperty[DataFlowFact]]]): Iterable[(Cell[IFDSProperty[DataFlowFact]], IFDSProperty[DataFlowFact])] = {
+    override def resolve[K <: Key[IFDSProperty[DataFlowFact]]](cells: Iterable[Cell[K, IFDSProperty[DataFlowFact]]]): Iterable[(Cell[K, IFDSProperty[DataFlowFact]], IFDSProperty[DataFlowFact])] = {
       val p = createProperty(Map.empty)
       cells.map((_, p))
     }
 
-    override def fallback(cells: Iterable[Cell[IFDSProperty[DataFlowFact]]]): Iterable[(Cell[IFDSProperty[DataFlowFact]], IFDSProperty[DataFlowFact])] = {
+    override def fallback[K <: Key[IFDSProperty[DataFlowFact]]](cells: Iterable[Cell[K, IFDSProperty[DataFlowFact]]]): Iterable[(Cell[K, IFDSProperty[DataFlowFact]], IFDSProperty[DataFlowFact])] = {
       val p = createProperty(Map.empty)
       cells.map((_, p))
     }
@@ -76,16 +74,14 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
     override def join(v1: IFDSProperty[DataFlowFact], v2: IFDSProperty[DataFlowFact]): IFDSProperty[DataFlowFact] =
       createProperty(mergeMaps(v1.flows, v2.flows))
 
-
-
     override val bottom: IFDSProperty[DataFlowFact] = createProperty(Map.empty)
   }
 
-  implicit val pool: HandlerPool[IFDSProperty[DataFlowFact]] = new HandlerPool[IFDSProperty[DataFlowFact]](key = TheKey, parallelism = parallelism, schedulingStrategy = scheduling)
+  implicit val pool: HandlerPool = new HandlerPool(parallelism, schedulingStrategy = scheduling)
 
   // Each cell represents a Method + the flow facts currently known.
   // The following maps maps (method,fact) to cells
-  private val mfToCell = TrieMap.empty[(DeclaredMethod, DataFlowFact), Cell[IFDSProperty[DataFlowFact]]]
+  private val mfToCell = TrieMap.empty[(DeclaredMethod, DataFlowFact), Cell[TheKey.type, IFDSProperty[DataFlowFact]]]
 
   /**
     * Provides the concrete property key (that must be unique for every distinct concrete analysis
@@ -130,7 +126,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
                val code:          Array[Stmt[DUVar[ValueInformation]]],
                val cfg:           CFG[Stmt[DUVar[ValueInformation]], TACStmts[DUVar[ValueInformation]]],
                var ifdsData:      Map[(DeclaredMethod, DataFlowFact), Set[(BasicBlock, Int)]],
-               var ifdsDependees: Map[Cell[IFDSProperty[DataFlowFact]], Outcome[IFDSProperty[DataFlowFact]]] = Map.empty,
+               var ifdsDependees: Map[(DeclaredMethod, DataFlowFact), Outcome[IFDSProperty[DataFlowFact]]] = Map.empty,
                // DataFlowFacts known to be valid on entry to a basic block
                var incoming: Map[BasicBlock, Set[DataFlowFact]] = Map.empty,
                // DataFlowFacts known to be valid on exit from a basic block on the cfg edge to a specific successor
@@ -144,10 +140,9 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
     cell(e).getResult()
 
   /** Map (method, fact) pairs to cells. A new cell is created, if it does not exist yet. See also mf() for the reverse direction. */
-  private def cell(source: (DeclaredMethod, DataFlowFact)): Cell[IFDSProperty[DataFlowFact]] = {
+  private def cell(source: (DeclaredMethod, DataFlowFact)): Cell[TheKey.type, IFDSProperty[DataFlowFact]] = {
     // Can performance be improved if we first check, if mfToCell.isDefinedAt(source) first?
-    val c = pool.mkSequentialCell(c ⇒ performAnalysis(source))
-    c.obj = source
+    val c = pool.mkCell(TheKey, (c: Cell[TheKey.type, IFDSProperty[DataFlowFact]]) ⇒ performAnalysis(source))
     mfToCell.putIfAbsent(source, c)
       .getOrElse(c)
   }
@@ -279,14 +274,16 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
       FinalOutcome(createProperty(result))
     } else {
       val thisCell = cell(state.source)
-      thisCell.when(cont, dependees.keys.toSeq: _*)
+      dependees.keys.foreach(dependee ⇒ {
+        thisCell.whenSequential(cell(dependee), (_, _) ⇒ cont(dependee))
+      })
       NextOutcome(createProperty(result))
     }
   }
 
-  def cont(updates: Iterable[(Cell[IFDSProperty[DataFlowFact]],  Try[ValueOutcome[IFDSProperty[DataFlowFact]]])])(implicit state: State): Outcome[IFDSProperty[DataFlowFact]] = {
-    // TODO It would be nice to not loop over all updates but instead pass the set of updates to handleCallUpdate
-    updates.foreach(upd => handleCallUpdate( upd._1.obj.asInstanceOf[(DeclaredMethod, DataFlowFact)]))
+  def cont(dependee: (DeclaredMethod, DataFlowFact))(implicit state: State): Outcome[IFDSProperty[DataFlowFact]] = {
+    handleCallUpdate(dependee)
+
     createResult()
   }
 
@@ -484,27 +481,22 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
           val e = (callee, fact)
           val c = cell(e)
 
+          val callFlows = (c.isComplete, c.getResult())
 
-          val callFlows =
-            if (c.isComplete)
-              FinalOutcome(c.getResult())
-            else
-              NextOutcome(c.getResult())
-
-          val oldState = state.ifdsDependees.get(c)
+          val oldState = state.ifdsDependees.get(e)
 
           fromCall = mergeMaps(
             fromCall,
             mapDifference( // Only process new facts, that were not known in `oldState`
               callFlows match {
-                case FinalOutcome(p) ⇒
-                  state.ifdsDependees -= c
+                case (true, p) ⇒
+                  state.ifdsDependees -= e
                   p.flows
-                case NextOutcome(p) ⇒
+                case (false, p) ⇒
                   val newDependee =
                     state.ifdsData.getOrElse(e, Set.empty) + ((callBB, call.index))
                   state.ifdsData = state.ifdsData.updated(e, newDependee)
-                  state.ifdsDependees += c → callFlows
+                  state.ifdsDependees += e → Outcome(callFlows._2, callFlows._1)
                   p.flows
               },
               if (oldState.isDefined)
@@ -515,7 +507,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
               else Map.empty
             )
           )
-          if (oldState.isDefined && oldState.get != callFlows) {
+          if (oldState.isDefined && oldState.get.asInstanceOf[ValueOutcome[DataFlowFact]].value != callFlows._2) {
             handleCallUpdate(e)
           }
         }
@@ -625,7 +617,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
 
     val decl = declaredMethods(source._1.definedMethod)
     val baseCell = cell((decl, sourceFact))
-    thisCell.when(_.head._2.get, baseCell)
+    thisCell.when(baseCell, (v, isFinal) ⇒ Outcome(v, isFinal))
 
     NoOutcome // we do not have any information yet but solely depend on the base class
   }

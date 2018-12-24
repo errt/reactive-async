@@ -3,7 +3,7 @@ package com.phaller.rasync.test.opal.ifds
 
 import java.net.URL
 
-import com.phaller.rasync.pool._
+import com.phaller.rasync._
 import org.opalj.collection.immutable.RefArray
 import org.opalj.br.DeclaredMethod
 import org.opalj.br.ObjectType
