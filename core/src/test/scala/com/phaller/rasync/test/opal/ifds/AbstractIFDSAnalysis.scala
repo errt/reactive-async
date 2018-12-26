@@ -279,8 +279,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
   }
 
   def cont(updates: Iterable[(Cell[IFDSProperty[DataFlowFact]], Try[ValueOutcome[IFDSProperty[DataFlowFact]]])])(implicit state: State): Outcome[IFDSProperty[DataFlowFact]] = {
-    // TODO It would be nice to not loop over all updates but instead pass the set of updates to handleCallUpdate
-    updates.foreach(upd => handleCallUpdate(upd._1.obj.asInstanceOf[(DeclaredMethod, DataFlowFact)]))
+    handleCallUpdates(updates.map(_._1.obj.asInstanceOf[(DeclaredMethod, DataFlowFact)]))
     createResult()
   }
 
@@ -417,6 +416,25 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
           Some(callSite),
           Some(Set(e._1.definedMethod)),
           Some(e._2)))
+    process(queue)
+  }
+
+  /** See handleCallUpdate(e) */
+  // This is a copy of handleCallUpdate(e) that loops over a set of updates more efficiently.
+  def handleCallUpdates(es: Iterable[(DeclaredMethod, DataFlowFact)])(implicit state: State): Unit = {
+    val queue: mutable.Queue[(BasicBlock, Set[DataFlowFact], Option[Int], Option[Set[Method]], Option[DataFlowFact])] =
+      mutable.Queue.empty
+    for (
+      e <- es;
+      blocks = state.ifdsData(e);
+      (block, callSite) ← blocks
+    ) queue.enqueue(
+      (
+        block,
+        state.incoming(block),
+        Some(callSite),
+        Some(Set(e._1.definedMethod)),
+        Some(e._2)))
     process(queue)
   }
 

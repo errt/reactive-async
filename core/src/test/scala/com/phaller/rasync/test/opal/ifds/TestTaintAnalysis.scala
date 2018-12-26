@@ -368,9 +368,10 @@ class TestTaintAnalysisRunner extends FunSuite {
         if (lastAvg != avg) {
           lastAvg = avg
           val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
-          println(s"RES: Scheduling = ${scheduling.getClass.getName}, #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
+          println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
         }
       }
+      println(s"AVG,${scheduling.getClass.getSimpleName},$threads,$lastAvg")
     }
   }
 }
