@@ -1,29 +1,25 @@
 /* BSD 2-Clause License - see OPAL/LICENSE for details. */
 package com.phaller.rasync.test.opal.ifds
 
-import java.net.URL
-
-import com.phaller.rasync.pool._
+import org.opalj.ai.domain.l2
+import org.opalj.ai.fpcf.analyses.LazyL0BaseAIAnalysis
+import org.opalj.ai.fpcf.properties.AIDomainFactoryKey
+import org.opalj.br.analyses.{ Project, SomeProject }
+import org.opalj.br.{ DeclaredMethod, Method, ObjectType }
+import org.opalj.bytecode.JRELibraryFolder
 import org.opalj.collection.immutable.RefArray
-import org.opalj.br.DeclaredMethod
-import org.opalj.br.ObjectType
-import org.opalj.br.Method
-import org.opalj.br.analyses.SomeProject
-import org.opalj.br.analyses.Project
-import org.opalj.fpcf.{ PropertyKey, PropertyStore, PropertyStoreContext, PropertyStoreKey }
+import org.opalj.fpcf.analyses._
+import org.opalj.fpcf._
 import org.opalj.fpcf.analyses.AbstractIFDSAnalysis.V
-import org.opalj.fpcf.analyses.Statement
 import org.opalj.fpcf.properties.{ IFDSProperty, IFDSPropertyMetaInformation }
 import org.opalj.fpcf.seq.PKESequentialPropertyStore
-import org.opalj.bytecode.JRELibraryFolder
 import org.opalj.log.LogContext
 import org.opalj.tac._
+import org.opalj.tac.fpcf.analyses.TACAITransformer
 import org.opalj.util.{ Nanoseconds, PerformanceEvaluation }
 import org.scalatest.FunSuite
 
 import scala.collection.immutable.ListSet
-import scala.concurrent.Await
-import scala.concurrent.duration.Duration
 
 trait Fact
 
@@ -39,20 +35,11 @@ case class FlowFact(flow: ListSet[Method]) extends Fact {
  *
  * @author Dominik Helm
  */
-class TestTaintAnalysis(
-  parallelism: Int = Runtime.getRuntime.availableProcessors(),
-  scheduling: SchedulingStrategy = DefaultScheduling)(
+class TestTaintAnalysis private (
   implicit
-  val project: SomeProject) extends AbstractIFDSAnalysis[Fact](parallelism, scheduling) {
+  val project: SomeProject) extends AbstractIFDSAnalysis[Fact] {
 
   override val property: IFDSPropertyMetaInformation[Fact] = Taint
-
-  override def waitForCompletion(duration: Duration = Duration("10h")): Unit = {
-    val fut = pool.quiescentResolveCell
-    Await.ready(fut, duration)
-  }
-
-  //    Methods below have not been changed when migrating the code to RA
 
   override def createProperty(result: Map[Statement, Set[Fact]]): IFDSProperty[Fact] = {
     new Taint(result)
@@ -74,6 +61,18 @@ class TestTaintAnalysis(
         else if (index.isDefined && definedBy.size == 1) // Untaint if possible
           in - ArrayElement(definedBy.head, index.get)
         else in
+      /*case PutStatic.ASTID ⇒
+              val put = stmt.stmt.asPutStatic
+              if (isTainted(put.value, in)) in + StaticField(put.declaringClass, put.name)
+              else in - StaticField(put.declaringClass, put.name)*/
+      /*case PutField.ASTID ⇒
+              val put = stmt.stmt.asPutField
+              val definedBy = put.objRef.asVar.definedBy
+              if (isTainted(put.value, in))
+                  in ++ definedBy.iterator.map(InstanceField(_, put.declaringClass, put.name))
+              else if (definedBy.size == 1) // Untaint if object is known precisely
+                  in - InstanceField(definedBy.head, put.declaringClass, put.name)
+              else in */
       case _ ⇒ in
     }
 
@@ -136,6 +135,24 @@ class TestTaintAnalysis(
           in + Variable(stmt.index)
         else
           in
+      /*case GetStatic.ASTID ⇒
+          val get = expr.asGetStatic
+          if (in.contains(StaticField(get.declaringClass, get.name)))
+              in + Variable(stmt.index)
+          else in*/
+      /*case GetField.ASTID ⇒
+          val get = expr.asGetField
+          if (in.exists {
+              // The specific field may be tainted
+              case InstanceField(index, _, taintedField) ⇒
+                  taintedField == get.name && get.objRef.asVar.definedBy.contains(index)
+              // Or the whole object
+              case Variable(index) ⇒ get.objRef.asVar.definedBy.contains(index)
+              case _               ⇒ false
+          })
+              in + Variable(stmt.index)
+          else
+              in*/
       case _ ⇒ in
     }
 
@@ -176,6 +193,17 @@ class TestTaintAnalysis(
             case (param, pIndex) if param.asVar.definedBy.contains(index) ⇒
               ArrayElement(paramToIndex(pIndex, !callee.definedMethod.isStatic), taintedIndex)
           }
+
+        /*case InstanceField(index, declClass, taintedField) ⇒
+            // Taint field of formal parameter if field of actual parameter is tainted
+            // Only if the formal parameter is of a type that may have that field!
+            asCall(stmt.stmt).allParams.zipWithIndex.collect {
+                case (param, pIndex) if param.asVar.definedBy.contains(index) &&
+                    (paramToIndex(pIndex, !callee.definedMethod.isStatic) != -1 ||
+                        classHierarchy.isSubtypeOf(declClass, callee.declaringClassType)) ⇒
+                    InstanceField(paramToIndex(pIndex, !callee.definedMethod.isStatic), declClass, taintedField)
+            }*/
+        //case sf: StaticField ⇒ Set(sf)
       }.flatten
     } else Set.empty
   }
@@ -296,6 +324,13 @@ class TestTaintAnalysis(
     index ← m.descriptor.parameterTypes.zipWithIndex.collect { case (pType, index) if pType == ObjectType.String ⇒ index }
   } //yield (declaredMethods(m), null)
   yield declaredMethods(m) → Variable(-2 - index)).toMap
+
+}
+
+object TestTaintAnalysis extends IFDSAnalysis[Fact] {
+  override def init(p: SomeProject, ps: PropertyStore) = new TestTaintAnalysis()(p)
+
+  override def property: IFDSPropertyMetaInformation[Fact] = Taint
 }
 
 class Taint(val flows: Map[Statement, Set[Fact]]) extends IFDSProperty[Fact] {
@@ -320,58 +355,61 @@ class TestTaintAnalysisRunner extends FunSuite {
   }
 
   def main(args: Array[String]): Unit = {
-
     val p0 = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
 
-    for (
-      scheduling <- List(DefaultScheduling, OthersWithManySuccessorsFirst, OthersWithManySuccessorsLast, CellsWithManyPredecessorsFirst, CellsWithManyPredecessorsLast, CellsWithManySuccessorsFirst, CellsWithManySuccessorsLast);
-      threads <- List(1, 2, 4, 8, 16, 32)
-    ) {
-      var result = 0
-      var lastAvg = 0L
-      PerformanceEvaluation.time(2, 4, 3, {
-
-        implicit val p: Project[URL] = p0.recreate()
-
-        // Using PropertySore here is fine, it is not use during analysis
-        p.getOrCreateProjectInformationKeyInitializationData(
-          PropertyStoreKey,
-          (context: List[PropertyStoreContext[AnyRef]]) ⇒ {
-            implicit val lg: LogContext = p.logContext
-            val ps = PKESequentialPropertyStore(context: _*)
-            PropertyStore.updateDebug(false)
-            ps
-          })
-
-        // From now on, we may access ps for read operations only
-        // We can now start TestTaintAnalysis using IFDS.
-        val analysis = new TestTaintAnalysis(threads, scheduling)
-
-        val entryPoints = analysis.entryPoints
-        entryPoints.foreach(analysis.forceComputation)
-        analysis.waitForCompletion()
-
-        result = 0
-        for {
-          e ← entryPoints
-          fact ← analysis.getResult(e).flows.values.flatten.toSet[Fact]
-        } {
-          fact match {
-            case FlowFact(_) ⇒ result += 1
-            case _ ⇒
-          }
-        }
-        println(s"NUM RESULTS =  $result")
-      }) { (_, ts) ⇒
-        val sTs = ts.map(_.toSeconds).mkString(", ")
-        val avg = ts.map(_.timeSpan).sum / ts.size
-        if (lastAvg != avg) {
-          lastAvg = avg
-          val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
-          println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
+    var result = 0
+    var lastAvg = 0L
+    PerformanceEvaluation.time(2, 4, 3, {
+      val p = p0.recreate()
+      p.getOrCreateProjectInformationKeyInitializationData(
+        PropertyStoreKey,
+        (context: List[PropertyStoreContext[AnyRef]]) ⇒ {
+          implicit val lg: LogContext = p.logContext
+          val ps = PKESequentialPropertyStore.apply(context: _*)
+          PropertyStore.updateDebug(false)
+          ps
+        })
+      /*
+      p.updateProjectInformationKeyInitializationData(
+          AIDomainFactoryKey,
+          (i: Option[Set[Class[_ <: AnyRef]]]) ⇒ (i match {
+              case None               ⇒ Set(classOf[l1.DefaultDomainWithCFGAndDefUse[_]])
+              case Some(requirements) ⇒ requirements + classOf[l1.DefaultDomainWithCFGAndDefUse[_]]
+          }): Set[Class[_ <: AnyRef]]
+      )
+      */
+      p.updateProjectInformationKeyInitializationData(
+        AIDomainFactoryKey,
+        (i: Option[Set[Class[_ <: AnyRef]]]) ⇒ (i match {
+          case None ⇒ Set(classOf[l2.DefaultPerformInvocationsDomainWithCFGAndDefUse[_]])
+          case Some(requirements) ⇒ requirements + classOf[l2.DefaultPerformInvocationsDomainWithCFGAndDefUse[_]]
+        }): Set[Class[_ <: AnyRef]])
+      val ps = p.get(PropertyStoreKey)
+      val manager = p.get(FPCFAnalysesManagerKey)
+      val (_, analyses) =
+        manager.runAll(LazyL0BaseAIAnalysis, TACAITransformer, TestTaintAnalysis)
+      val entryPoints = analyses.collect { case a: TestTaintAnalysis ⇒ a.entryPoints }.head
+      result = 0
+      for {
+        e ← entryPoints
+        flows = ps(e, TestTaintAnalysis.property.key)
+        fact ← flows.ub.asInstanceOf[IFDSProperty[Fact]].flows.values.flatten.toSet[Fact]
+      } {
+        fact match {
+          case FlowFact(_) ⇒ result += 1
+          case _ ⇒
         }
       }
-      println(s"AVG,${scheduling.getClass.getSimpleName},$threads,$lastAvg")
+      println(s"NUM RESULTS =  $result")
+    }) { (_, ts) ⇒
+      val sTs = ts.map(_.toSeconds).mkString(", ")
+      val avg = ts.map(_.timeSpan).sum / ts.size
+      if (lastAvg != avg) {
+        lastAvg = avg
+        val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
+        println(s"RES= ($result flows) $avgInSeconds;Ts: $sTs")
+      }
     }
+    println(s"AVG,$lastAvg")
   }
 }
