@@ -56,3 +56,5 @@ lazy val bench: Project = (project in file("bench")).
     inConfig(Benchmark)(Defaults.testSettings): _*
   ).
   dependsOn(core)
+
+javaOptions in ThisBuild ++= Seq("-Xmx27G", "-Xms1024m", "-XX:ThreadStackSize=2048")
