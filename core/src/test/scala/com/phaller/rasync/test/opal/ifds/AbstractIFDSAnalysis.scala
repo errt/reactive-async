@@ -55,7 +55,7 @@ import scala.util.Try
  * @author Jan Kölzer (adaption to Reactive Async)
  */
 // The `scheduling` is only for testing. In production, one would create a HandlerPool with the best scheduling for IFDS
-abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.getRuntime.availableProcessors(), scheduling: SchedulingStrategy) extends FPCFAnalysis {
+abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: SchedulingStrategy) extends FPCFAnalysis {
 
   private val tacProvider: Method ⇒ TACode[TACMethodParameter, DUVar[ValueInformation]] = project.get(DefaultTACAIKey)
 
@@ -626,6 +626,8 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int = Runtime.get
 
     NoOutcome // we do not have any information yet but solely depend on the base class
   }
+
+  val entryPoints: Map[DeclaredMethod, DataFlowFact]
 }
 
 object AbstractIFDSAnalysis {
