@@ -1,6 +1,8 @@
 /* BSD 2-Clause License - see OPAL/LICENSE for details. */
 package com.phaller.rasync.test.opal.ifds
 
+import java.net.URL
+
 import org.opalj.ai.domain.l2
 import org.opalj.ai.fpcf.analyses.LazyL0BaseAIAnalysis
 import org.opalj.ai.fpcf.properties.AIDomainFactoryKey
@@ -12,7 +14,7 @@ import org.opalj.fpcf.analyses._
 import org.opalj.fpcf._
 import org.opalj.fpcf.analyses.AbstractIFDSAnalysis.V
 import org.opalj.fpcf.properties.{ IFDSProperty, IFDSPropertyMetaInformation }
-import org.opalj.fpcf.seq.PKESequentialPropertyStore
+import org.opalj.fpcf.seq.{ DependeeUpdateHandling, PKESequentialPropertyStore }
 import org.opalj.log.LogContext
 import org.opalj.tac._
 import org.opalj.tac.fpcf.analyses.TACAITransformer
@@ -357,59 +359,63 @@ class TestTaintAnalysisRunner extends FunSuite {
   def main(args: Array[String]): Unit = {
     val p0 = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
 
-    var result = 0
-    var lastAvg = 0L
-    PerformanceEvaluation.time(2, 4, 3, {
-      val p = p0.recreate()
-      p.getOrCreateProjectInformationKeyInitializationData(
-        PropertyStoreKey,
-        (context: List[PropertyStoreContext[AnyRef]]) ⇒ {
-          implicit val lg: LogContext = p.logContext
-          val ps = PKESequentialPropertyStore.apply(context: _*)
-          PropertyStore.updateDebug(false)
-          ps
-        })
-      /*
-      p.updateProjectInformationKeyInitializationData(
+    for (
+      delayHandlingOfFinalDependeeUpdates ← List(false, true);
+      delayHandlingOfNonFinalDependeeUpdates ← List(false, true);
+      delayHandlingOfDependerNotification ← List(false, true)
+    ) {
+
+      var result = 0
+      var lastAvg = 0L
+      PerformanceEvaluation.time(2, 4, 3, {
+        val p: Project[URL] = p0.recreate()
+        p.getOrCreateProjectInformationKeyInitializationData(
+          PropertyStoreKey,
+          (context: List[PropertyStoreContext[AnyRef]]) ⇒ {
+            implicit val lg: LogContext = p.logContext
+            val ps = PKESequentialPropertyStore.apply(context: _*)
+            PropertyStore.updateDebug(false)
+
+            ps.dependeeUpdateHandling = DependeeUpdateHandling(
+              delayHandlingOfFinalDependeeUpdates = delayHandlingOfFinalDependeeUpdates,
+              delayHandlingOfNonFinalDependeeUpdates = delayHandlingOfNonFinalDependeeUpdates)
+            ps.delayHandlingOfDependerNotification = delayHandlingOfDependerNotification
+            ps
+          })
+
+        p.updateProjectInformationKeyInitializationData(
           AIDomainFactoryKey,
           (i: Option[Set[Class[_ <: AnyRef]]]) ⇒ (i match {
-              case None               ⇒ Set(classOf[l1.DefaultDomainWithCFGAndDefUse[_]])
-              case Some(requirements) ⇒ requirements + classOf[l1.DefaultDomainWithCFGAndDefUse[_]]
-          }): Set[Class[_ <: AnyRef]]
-      )
-      */
-      p.updateProjectInformationKeyInitializationData(
-        AIDomainFactoryKey,
-        (i: Option[Set[Class[_ <: AnyRef]]]) ⇒ (i match {
-          case None ⇒ Set(classOf[l2.DefaultPerformInvocationsDomainWithCFGAndDefUse[_]])
-          case Some(requirements) ⇒ requirements + classOf[l2.DefaultPerformInvocationsDomainWithCFGAndDefUse[_]]
-        }): Set[Class[_ <: AnyRef]])
-      val ps = p.get(PropertyStoreKey)
-      val manager = p.get(FPCFAnalysesManagerKey)
-      val (_, analyses) =
-        manager.runAll(LazyL0BaseAIAnalysis, TACAITransformer, TestTaintAnalysis)
-      val entryPoints = analyses.collect { case a: TestTaintAnalysis ⇒ a.entryPoints }.head
-      result = 0
-      for {
-        e ← entryPoints
-        flows = ps(e, TestTaintAnalysis.property.key)
-        fact ← flows.ub.asInstanceOf[IFDSProperty[Fact]].flows.values.flatten.toSet[Fact]
-      } {
-        fact match {
-          case FlowFact(_) ⇒ result += 1
-          case _ ⇒
+            case None ⇒ Set(classOf[l2.DefaultPerformInvocationsDomainWithCFGAndDefUse[_]])
+            case Some(requirements) ⇒ requirements + classOf[l2.DefaultPerformInvocationsDomainWithCFGAndDefUse[_]]
+          }): Set[Class[_ <: AnyRef]])
+        val ps = p.get(PropertyStoreKey)
+        val manager = p.get(FPCFAnalysesManagerKey)
+        val (_, analyses) =
+          manager.runAll(LazyL0BaseAIAnalysis, TACAITransformer, TestTaintAnalysis)
+        val entryPoints = analyses.collect { case a: TestTaintAnalysis ⇒ a.entryPoints }.head
+        result = 0
+        for {
+          e ← entryPoints
+          flows = ps(e, TestTaintAnalysis.property.key)
+          fact ← flows.ub.asInstanceOf[IFDSProperty[Fact]].flows.values.flatten.toSet[Fact]
+        } {
+          fact match {
+            case FlowFact(_) ⇒ result += 1
+            case _ ⇒
+          }
+        }
+        println(s"NUM RESULTS =  $result")
+      }) { (_, ts) ⇒
+        val sTs = ts.map(_.toSeconds).mkString(", ")
+        val avg = ts.map(_.timeSpan).sum / ts.size
+        if (lastAvg != avg) {
+          lastAvg = avg
+          val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
+          println(s"RES= ($result flows) $avgInSeconds;Ts: $sTs")
         }
       }
-      println(s"NUM RESULTS =  $result")
-    }) { (_, ts) ⇒
-      val sTs = ts.map(_.toSeconds).mkString(", ")
-      val avg = ts.map(_.timeSpan).sum / ts.size
-      if (lastAvg != avg) {
-        lastAvg = avg
-        val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
-        println(s"RES= ($result flows) $avgInSeconds;Ts: $sTs")
-      }
+      println(s"AVG,$lastAvg")
     }
-    println(s"AVG,$lastAvg")
   }
 }
