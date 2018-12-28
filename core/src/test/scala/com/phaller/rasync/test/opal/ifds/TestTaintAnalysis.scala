@@ -324,7 +324,7 @@ class TestTaintAnalysisRunner extends FunSuite {
     val p0 = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
 
     for (
-      scheduling <- List(DefaultScheduling, OthersWithManySuccessorsFirst, OthersWithManySuccessorsLast, CellsWithManyPredecessorsFirst, CellsWithManyPredecessorsLast, CellsWithManySuccessorsFirst, CellsWithManySuccessorsLast);
+      scheduling <- List(DefaultScheduling, OthersWithManySuccessorsFirst, OthersWithManySuccessorsLast, CellsWithManyPredecessorsFirst, CellsWithManyPredecessorsLast, CellsWithManySuccessorsFirst, CellsWithManySuccessorsLast, OthersWithManyPredecessorsFirst, OthersWithManyPredecessorsLast);
       threads <- List(1, 2, 4, 8, 16, 32)
     ) {
       var result = 0

@@ -1,7 +1,6 @@
 package com.phaller.rasync.pool
 
 import com.phaller.rasync.cell.Cell
-import com.phaller.rasync.lattice.Key
 
 /**
  * A scheduling strategy defines priorities for dependency callbacks
@@ -48,6 +47,22 @@ object OthersWithManySuccessorsLast extends SchedulingStrategy {
 
   override def calcPriority[V](cell: Cell[V]): Int =
     cell.numDependentCells
+}
+
+object OthersWithManyPredecessorsFirst extends SchedulingStrategy {
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+    -other.numDependencies
+
+  override def calcPriority[V](cell: Cell[V]): Int =
+    -cell.numDependencies
+}
+
+object OthersWithManyPredecessorsLast extends SchedulingStrategy {
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+    other.numDependencies
+
+  override def calcPriority[V](cell: Cell[V]): Int =
+    cell.numDependencies
 }
 
 object CellsWithManyPredecessorsFirst extends SchedulingStrategy {
