@@ -180,7 +180,7 @@ class TestTaintAnalysis private (
       })
         println(s"Found flow: $stmt")
       Set.empty
-    } else if ((callee.descriptor.returnType eq ObjectType.Class) ||
+    } else if (true || (callee.descriptor.returnType eq ObjectType.Class) ||
       (callee.descriptor.returnType eq ObjectType.Object)) {
       in.collect {
         case Variable(index) ⇒ // Taint formal parameter if actual parameter is tainted
@@ -415,7 +415,7 @@ class TestTaintAnalysisRunner extends FunSuite {
           println(s"RES= ($result flows) $avgInSeconds;Ts: $sTs")
         }
       }
-      println(s"AVG,$lastAvg")
+      println(s"AVG,$delayHandlingOfFinalDependeeUpdates,$delayHandlingOfNonFinalDependeeUpdates,$delayHandlingOfDependerNotification,$lastAvg")
     }
   }
 }
