@@ -194,7 +194,7 @@ class HandlerPool[V](
 
   /** Resolve all cells with the associated value. */
   private def resolve(results: Iterable[(Cell[V], V)]): Boolean = {
-    val cells = results.map(_._1.completer).toSeq
+    val cells = results.map(_._1).toSeq
     for ((c, v) <- results)
       execute(new Runnable {
         override def run(): Unit = {

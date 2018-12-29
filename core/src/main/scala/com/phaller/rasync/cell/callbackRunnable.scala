@@ -13,11 +13,8 @@ import scala.util.{ Failure, Success, Try }
  * CallbackRunnables are tasks that need to be run, when a value of a cell changes, that
  * some completer depends on.
  *
- * CallbackRunnables store information about whether the dependency has been registered via whenComplete/whenNext
- * and when/whenSequential and the involved cells/completers.
- *
- * Run a callback in a handler pool, if a value in a cell changes.
- * Call execute() to add the callback to the given HandlerPool.
+ * CallbackRunnables store information about the involved cells and whether the dependency
+ * callbacks need to be called sequentually.
  */
 private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnable {
   val pool: HandlerPool[V]
@@ -45,10 +42,9 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
       if (oldUpdatedDependees.isEmpty)
         pool.execute(this, pool.schedulingStrategy.calcPriority(dependentCompleter.cell, other))
     } else addUpdate(other) // retry
-    // TODO Do we have to avoid propagations after final propagations?
   }
 
-  /** Call the callback and use update dependentCompleter according to the callback's result. */
+  /** Call the callback and update dependentCompleter according to the callback's result. */
   def run(): Unit = {
     if (sequential) {
       dependentCompleter.sequential {
@@ -63,11 +59,11 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
     if (!dependentCompleter.cell.isComplete) {
 
       try {
-        // remove all updates form the list of updates that need to be handled – they will now be handled
+        // Remove all updates from the list of updates that need to be handled – they will now be handled
         val dependees = updatedDependees.getAndSet(Set.empty)
         val propagations = dependees.map(c => (c, c.getState()))
 
-        val depRemoved = // see below for depRemoved
+        val depsRemoved = // see below for depsRemoved
           callback(propagations) match {
             case NextOutcome(v) =>
               dependentCompleter.putNext(v)
@@ -78,12 +74,17 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
             case FreezeOutcome =>
               dependentCompleter.freeze()
               true
-            case NoOutcome => false /* do nothing */
+            case NoOutcome =>
+              // Do not change the value of the cell
+              // but remove all dependees that have had
+              // a final value from the lists of dependees.
+              false
           }
         // if the dependency has not been removed yet,
         // we can remove it, if a FinalOutcome has been propagted
         // or a Failuare has been propagated, i.e. the dependee had been completed
-        if (!depRemoved) {
+        // and cannot change later
+        if (!depsRemoved) {
           val toRemove = propagations.filter({
             case (_, Success(NextOutcome(_))) => false
             case _ => true
@@ -91,7 +92,7 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
           dependentCompleter.cell.removeDependeeCells(toRemove)
         }
       } catch {
-        // An exception thrown in a callback is stored as  the final value for the depender
+        // An exception thrown in a callback is stored as the final value for the depender
         case e: Exception =>
           dependentCompleter.putFailure(Failure(e))
       }

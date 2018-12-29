@@ -43,7 +43,7 @@ private[rasync] trait CellCompleter[V] {
   def freeze(): Unit
 
   private[rasync] def tryNewState(value: V): Unit
-  private[rasync] def tryComplete(value: Try[V], dontCall: Option[Seq[CellCompleter[V]]]): Unit
+  private[rasync] def tryComplete(value: Try[V], dontCall: Option[Seq[Cell[V]]]): Unit
 
   /**
    * Run code for `this` cell sequentially.
