@@ -47,10 +47,21 @@ import org.opalj.br.instructions.INVOKEVIRTUAL
 import org.opalj.br.instructions.INVOKEINTERFACE
 import org.opalj.br.instructions.MethodInvocationInstruction
 import org.opalj.br.instructions.NonVirtualMethodInvocationInstruction
+import org.opalj.bytecode.JRELibraryFolder
 
 import scala.util.Try
 
 object PurityAnalysis extends DefaultOneStepAnalysis {
+
+  override def main(args: Array[String]): Unit = {
+    val lib = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
+
+    for (_ ← 1 to 5) {
+      val p = lib.recreate()
+      val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
+      println(report)
+    }
+  }
 
   override def doAnalyze(
     project: Project[URL],
@@ -59,7 +70,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 
     val startTime = System.currentTimeMillis // Used for measuring execution time
     // 1. Initialization of key data structures (one cell(completer) per method)
-    implicit val pool = new HandlerPool(PurityKey)
+    implicit val pool: HandlerPool[Purity] = new HandlerPool(PurityKey)
     var methodToCell = Map.empty[Method, Cell[Purity]]
     for {
       classFile <- project.allProjectClassFiles
@@ -90,14 +101,14 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     val analysisTime = endTime - middleTime
     val combinedTime = endTime - startTime
 
-    val pureMethods = methodToCell.filter(_._2.getResult match {
+    val pureMethods = methodToCell.filter(_._2.getResult() match {
       case Pure => true
       case _ => false
-    }).map(_._1)
+    }).keys
 
     val pureMethodsInfo = pureMethods.map(m => m.toJava).toList.sorted
 
-    BasicReport("pure methods analysis:\n" + pureMethodsInfo.mkString("\n") +
+    BasicReport(s"pure methods analysis:\nPURE=${pureMethods.size}\n\n" + pureMethodsInfo.mkString("\n") +
       s"\nSETUP TIME: $setupTime" +
       s"\nANALYIS TIME: $analysisTime" +
       s"\nCOMBINED TIME: $combinedTime")
@@ -123,7 +134,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       return FinalOutcome(Impure)
     }
 
-    var hasDependencies = false
+    val dependencies = scala.collection.mutable.Set.empty[Method]
     val declaringClassType = classFile.thisType
     val methodDescriptor = method.descriptor
     val methodName = method.name
@@ -164,10 +175,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 
               case Success(callee) ⇒
                 /* Recall that self-recursive calls are handled earlier! */
-
-                val targetCell = methodToCell(callee)
-                hasDependencies = true
-                cell.when(c, targetCell)
+                dependencies.add(callee)
 
               case _ /* Empty or Failure */ ⇒
 
@@ -201,16 +209,21 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       currentPC = body.pcOfNextInstruction(currentPC)
     }
 
-    // Every method that is not identified as being impure is (conditionally)pure.
-    if (!hasDependencies) {
+    // Every method that is not identified as being impure is (conditionally) pure.
+    if (dependencies.isEmpty) {
       FinalOutcome(Pure)
-      //println("Immediately Pure Method: "+method.toJava(classFile))
     } else {
+      cell.when(c, dependencies.map(methodToCell).toSeq: _*)
       NextOutcome(UnknownPurity) // == NoOutcome
     }
   }
 
   def c(v: Iterable[(Cell[Purity], Try[ValueOutcome[Purity]])]): Outcome[Purity] = {
-    if (v.head._2.get.value == Impure) FinalOutcome(Impure) else NoOutcome
+    // If any dependee is Impure, the dependent Cell is impure.
+    // Otherwise, we do not know anything new.
+    // Exception will be rethrown.
+    if (v.exists(_._2.get.value == Impure))
+      FinalOutcome(Impure)
+    else NoOutcome
   }
 }
