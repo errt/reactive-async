@@ -56,10 +56,10 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
   override def main(args: Array[String]): Unit = {
     val lib = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
 
-    for (_ ← 1 to 5) {
+    for (_ ← 1 to 1) {
       val p = lib.recreate()
       val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
-      println(report)
+      println(report.toConsoleString.split("\n").slice(0,2).mkString("\n"))
     }
   }
 

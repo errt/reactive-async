@@ -2,7 +2,6 @@ package com.phaller.rasync.test
 
 import java.util.concurrent.CountDownLatch
 
-import com.phaller.rasync._
 import com.phaller.rasync.cell._
 import com.phaller.rasync.lattice.{ DefaultKey, Key, Updater }
 import com.phaller.rasync.pool.HandlerPool

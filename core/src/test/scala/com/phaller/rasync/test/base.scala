@@ -3,15 +3,15 @@ package test
 
 import org.scalatest.FunSuite
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
+import scala.concurrent.duration._
 
 import com.phaller.rasync.cell._
 
 import scala.util.{ Failure, Success, Try }
 import scala.concurrent.{ Await, Promise }
-import scala.concurrent.duration._
 import com.phaller.rasync.lattice._
 import com.phaller.rasync.pool.HandlerPool
-import com.phaller.rasync.test.lattice.{ IntUpdater, StringIntKey }
+import com.phaller.rasync.test.lattice.IntUpdater
 
 // Tests for puts and non-cyclic deps of the same type
 abstract class BaseSuite extends FunSuite with CompleterFactory {
