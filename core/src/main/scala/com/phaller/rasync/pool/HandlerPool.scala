@@ -194,17 +194,25 @@ class HandlerPool[V](
 
   /** Resolve all cells with the associated value. */
   private def resolve(results: Iterable[(Cell[V], V)]): Boolean = {
-    val cells = results.map(_._1).toSeq
-    for ((c, v) <- results)
-      execute(new Runnable {
-        override def run(): Unit = {
-          // Remove all callbacks that target other cells of this set.
-          // The result of those cells is explicitely given in `results`.
-          //          c.removeAllCallbacks(cells)
-          // we can now safely put a final value
-          c.resolveWithValue(v, cells)
-        }
-      }, schedulingStrategy.calcPriority(c))
+      val cells = results.map(_._1).toSeq
+
+      // split the results into several blocks for several threads
+      // the "+ 1" guarantuees, that the number of blocks is (a) > 0 and (b) <= parallelism.
+      val blocks = results.grouped(results.size / parallelism + 1)
+
+      for (block <- blocks) {
+        execute(new Runnable() {
+          override def run(): Unit = {
+            // handle all results of one block:
+            for ((c, v) <- block) {
+              // Resolve cell `c` but do not inform any
+              // other `cells` of the same cycle to avoid
+              // cyclic propagations.
+              c.resolveWithValue(v, cells)
+            }
+          }
+        }) // We don't assign priority, because there is a set of cells affected by this operation.
+      }
     results.nonEmpty
   }
 
