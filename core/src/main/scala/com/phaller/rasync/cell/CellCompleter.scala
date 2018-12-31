@@ -47,9 +47,8 @@ private[rasync] trait CellCompleter[V] {
 
   /**
    * Run code for `this` cell sequentially.
-   * @return The result of `f`.
    */
-  def sequential[T](f: => T): T
+  private[rasync] def sequential(f: () => _): Unit
 }
 
 object CellCompleter {

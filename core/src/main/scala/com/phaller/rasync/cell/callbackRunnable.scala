@@ -46,13 +46,8 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
 
   /** Call the callback and update dependentCompleter according to the callback's result. */
   def run(): Unit = {
-    if (sequential) {
-      dependentCompleter.sequential {
-        callCallback()
-      }
-    } else {
-      callCallback()
-    }
+    if (sequential) dependentCompleter.sequential(callCallback _)
+    else callCallback()
   }
 
   protected def callCallback(): Unit = {
