@@ -1,6 +1,5 @@
 package com.phaller.rasync.cell
 
-import com.phaller.rasync._
 import com.phaller.rasync.lattice.Updater
 import com.phaller.rasync.pool.HandlerPool
 
@@ -48,7 +47,7 @@ private[rasync] trait CellCompleter[V] {
   /**
    * Run code for `this` cell sequentially.
    */
-  private[rasync] def sequential(f: () => _): Unit
+  private[rasync] def sequential(f: () => _, prio: Int): Unit
 }
 
 object CellCompleter {

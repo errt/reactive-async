@@ -8,7 +8,7 @@ import lattice.Updater
 import pool.HandlerPool
 
 import scala.annotation.tailrec
-import scala.collection.immutable.Queue
+import scala.collection.mutable
 import scala.concurrent.duration.TimeUnit
 import scala.util.{ Failure, Success, Try }
 
@@ -147,6 +147,11 @@ private class FinalState[V](
  * Instances of the class use a `State` to store the current value and dependency information.
  */
 private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Updater[V], override val init: (Cell[V]) => Outcome[V]) extends Cell[V] with CellCompleter[V] {
+
+  implicit object SeqTaskOrdering extends Ordering[(Int, () => _)] {
+    override def compare(x: (Int, () => _), y: (Int, () => _)): Int = x._1 - y._1
+  }
+
   implicit val ctx: HandlerPool[V] = pool
 
   // Used for tests only.
@@ -158,7 +163,7 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
    */
   private val state: AtomicReference[State[V]] = new AtomicReference(IntermediateState.empty[V](updater))
 
-  private val queuedCallbacks = new AtomicReference[Queue[() => _]](Queue.empty)
+  private val queuedCallbacks = new AtomicReference(new mutable.PriorityQueue[(Int, () => _)]()(SeqTaskOrdering))
 
   // A list of callbacks to call, when `this` cell is completed/updated.
   // Note that this is not sync'ed with the state in any way, so calling `onComplete` or `onNext`
@@ -167,37 +172,39 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
   private var onNextHandler: List[Try[V] => Any] = List()
 
   @tailrec
-  override final def sequential(f: () => _): Unit = {
+  override final def sequential(f: () => _, prio: Int): Unit = {
     val currentQ = queuedCallbacks.get()
-    val newQ = currentQ.enqueue(f)
+    val newQ = currentQ.clone()
+    newQ.enqueue((prio, f))
     if (queuedCallbacks.compareAndSet(currentQ, newQ)) {
       if (currentQ.isEmpty) startSequentialTask()
-    } else sequential(f)
+    } else sequential(f, prio)
   }
 
   /** Submit a queued sequential task to the handler pool. Continues submitting until the queue is empty. */
   private def startSequentialTask() = {
     val cell = this
-    queuedCallbacks.get().headOption.foreach(task => {
-      // Take the first element but do not remove it yet.
-      // When other tasks are added they will find this task in the
-      // queue and not start a new thread.
+    queuedCallbacks.get().headOption.foreach({
+      case (prio, task) =>
+        // Take the first element but do not remove it yet.
+        // When other tasks are added they will find this task in the
+        // queue and not start a new thread.
 
-      pool.execute(new Runnable {
-        override def run(): Unit = {
-          try {
-            task.apply()
-          } catch {
-            // An exception thrown in a callback is stored as the final value for the depender
-            case e: Exception => cell.putFailure(Failure(e))
+        pool.execute(new Runnable {
+          override def run(): Unit = {
+            try {
+              task.apply()
+            } catch {
+              // An exception thrown in a callback is stored as the final value for the depender
+              case e: Exception => cell.putFailure(Failure(e))
+            }
+
+            // We have completed the head task.
+            // Now remove it from the queue. If there are more elements
+            // left, start the next one
+            removeCompletedSequentialTaks()
           }
-
-          // We have completed the head task.
-          // Now remove it from the queue. If there are more elements
-          // left, start the next one
-          removeCompletedSequentialTaks()
-        }
-      })
+        }, prio)
     })
   }
 

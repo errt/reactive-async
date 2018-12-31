@@ -30,23 +30,32 @@ private[rasync] trait CallbackRunnable[V] extends Runnable with OnCompleteRunnab
   protected val callback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V]
 
   private val updatedDependees = new AtomicReference[Set[Cell[V]]](Set.empty)
+  private var prio: Int = Int.MaxValue
 
   @tailrec
   final def addUpdate(other: Cell[V]): Unit = {
     val oldUpdatedDependees = updatedDependees.get
     val newUpdatedDependees = oldUpdatedDependees + other
     if (updatedDependees.compareAndSet(oldUpdatedDependees, newUpdatedDependees)) {
+
+      // We store a priority for sequential execution of this callbackRunnable.
+      // It is set to the highest priority found among the dependees that are
+      // part of this update.
+      // This computation of prio is not thread-safe but this does not matter for
+      // priorities are no hard requirement anyway.
+      prio = Math.min(prio, pool.schedulingStrategy.calcPriority(dependentCompleter.cell, other))
+
       // The first incoming update (since the last execution) starts this runnable.
       // Other cells might still be added to updatedDependees concurrently, the runnable
       // will collect all updates and forward them altogether.
       if (oldUpdatedDependees.isEmpty)
-        pool.execute(this, pool.schedulingStrategy.calcPriority(dependentCompleter.cell, other))
+        pool.execute(this, prio)
     } else addUpdate(other) // retry
   }
 
   /** Call the callback and update dependentCompleter according to the callback's result. */
   def run(): Unit = {
-    if (sequential) dependentCompleter.sequential(callCallback _)
+    if (sequential) dependentCompleter.sequential(callCallback _, prio)
     else callCallback()
   }
 
