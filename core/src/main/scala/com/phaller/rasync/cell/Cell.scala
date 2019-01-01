@@ -125,7 +125,7 @@ private class IntermediateState[V](override val res: Success[V], val tasksActive
 
 private object IntermediateState {
   def empty[V](updater: Updater[V]): IntermediateState[V] =
-    new IntermediateState[V](Success(updater.initial), false, Map.empty, Set.empty)
+    new IntermediateState[V](Success(updater.bottom), false, Map.empty, Set.empty)
 }
 
 private class FinalState[V](
@@ -177,7 +177,7 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
     val newQ = currentQ.clone()
     newQ.enqueue((prio, f))
     if (queuedCallbacks.compareAndSet(currentQ, newQ)) {
-      if (currentQ.isEmpty) startSequentialTask()
+      if (currentQ.isEmpty) startSequentialTask() // we could use the current thread for the first task. Refactor!
     } else sequential(f, prio)
   }
 
@@ -338,7 +338,7 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
         val newState = new IntermediateState[V](current.res, current.tasksActive, current.dependees, current.dependers + dependentCompleter)
         if (state.compareAndSet(current, newState)) {
 
-          if (newState.res.value != updater.initial) {
+          if (newState.res.value != updater.bottom) {
             // if there has been a change in the past, call callback immediately
             dependentCompleter.addUpdate(this)
           }
@@ -463,22 +463,21 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
    */
   @tailrec
   override private[rasync] final def setTasksActive(): Boolean = state.get match {
-    case pre: IntermediateState[_] =>
-      if (pre.tasksActive)
-        false
+    case current: IntermediateState[V] =>
+      if (current.tasksActive)
+        false // Cell has been active before
       else {
-        val current = pre.asInstanceOf[IntermediateState[V]]
         val newState = new IntermediateState(current.res, true, current.dependees, current.dependers)
-        if (!state.compareAndSet(current, newState)) setTasksActive()
-        else !pre.tasksActive
+        if (!state.compareAndSet(current, newState)) setTasksActive() // update failed, retry
+        else !current.tasksActive // return TRUE, iff previous value is FALSE
       }
-    case _ => false
+    case _ => false // Cell is final already
   }
 
   // Schedules execution of `callback` when next intermediate result is available.
   override private[rasync] def onNext[U](callback: Try[V] => U): Unit = state.get match {
     case _: IntermediateState[_] =>
-      if (getResult() != updater.initial) callback(Success(getResult()))
+      if (getResult() != updater.bottom) callback(Success(getResult()))
       onNextHandler = callback :: onNextHandler
     case _ => callback(Success(getResult()))
   }
