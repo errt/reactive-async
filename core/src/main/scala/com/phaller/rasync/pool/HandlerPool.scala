@@ -11,6 +11,7 @@ import org.opalj.graphs._
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
 import scala.concurrent.{ Future, Promise }
+import scala.util.{ Failure, Success }
 import scala.util.control.NonFatal
 
 /* Need to have reference equality for CAS.
@@ -184,28 +185,36 @@ class HandlerPool[V](
    * Resolves a cycle of unfinished cells via the key's `resolve` method.
    */
   private def resolveCycle(cells: Iterable[Cell[V]]): Boolean =
-    resolve(key.resolve(cells))
+    resolve(cells, key.resolve)
 
   /**
    * Resolves a cell with default value with the key's `fallback` method.
    */
   private def resolveDefault(cells: Iterable[Cell[V]]): Boolean =
-    resolve(key.fallback(cells))
+    resolve(cells, key.fallback)
 
   /** Resolve all cells with the associated value. */
-  private def resolve(results: Iterable[(Cell[V], V)]): Boolean = {
-    val cells = results.map(_._1).toSeq
-    for ((c, v) <- results)
-      execute(new Runnable {
-        override def run(): Unit = {
-          // Remove all callbacks that target other cells of this set.
-          // The result of those cells is explicitely given in `results`.
-          //          c.removeAllCallbacks(cells)
-          // we can now safely put a final value
-          c.resolveWithValue(v, cells)
-        }
-      }, schedulingStrategy.calcPriority(c))
-    results.nonEmpty
+  private def resolve(cells: Iterable[Cell[V]], k: (Iterable[Cell[V]]) => Iterable[(Cell[V], V)]): Boolean = {
+    try {
+      val results = k(cells)
+      val dontCall = results.map(_._1).toSeq
+      for ((c, v) <- results; t = Success(v))
+        execute(new Runnable {
+          override def run(): Unit = {
+            // resolve each cell with the given value
+            // but do not propagate among the cells in the same set (i.e. the same cSCC)
+            c.resolveWithValue(t, dontCall)
+          }
+        }, schedulingStrategy.calcPriority(c))
+      results.nonEmpty
+    } catch {
+      case e: Exception =>
+        // if an exception occurs, resolve all cells with a failure
+        val f = Failure(e)
+        val dontCall = cells.toSeq
+        cells.foreach(_.resolveWithValue(f, dontCall))
+        cells.nonEmpty
+    }
   }
 
   /**
@@ -303,10 +312,14 @@ class HandlerPool[V](
       // if the cell's state has successfully been changed, schedule further computations
       execute(() => {
         val completer = cell.completer
-        val outcome = completer.init(cell) // call the init method
-        outcome match {
-          case Outcome(v, isFinal) => completer.put(v, isFinal)
-          case NoOutcome => /* don't do anything */
+        try {
+          val outcome = completer.init(cell) // call the init method
+          outcome match {
+            case Outcome(v, isFinal) => completer.put(v, isFinal)
+            case NoOutcome => /* don't do anything */
+          }
+        } catch {
+          case e: Exception => completer.putFailure(Failure(e))
         }
       }, priority)
   }

@@ -59,7 +59,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     for (_ ← 1 to 1) {
       val p = lib.recreate()
       val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
-      println(report.toConsoleString.split("\n").slice(0,2).mkString("\n"))
+      println(report.toConsoleString.split("\n").slice(0, 2).mkString("\n"))
     }
   }
 

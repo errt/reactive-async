@@ -6,8 +6,6 @@ package com.phaller.rasync.cell
  * the cell; in the latter case the cell is completed.
  * Use `NoOutcome` to indicate that no progress is possible.
  */
-// Note that we do not use this as parameter for dependency callbacks,
-// as those arguments might be Failures
 sealed trait Outcome[+V]
 sealed trait FreezeOutcome[+V] extends Outcome[V]
 sealed trait IntermediateOutcome[+V] extends Outcome[V]

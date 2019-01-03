@@ -3,7 +3,7 @@ package com.phaller.rasync.test
 import java.util.concurrent.CountDownLatch
 
 import com.phaller.rasync.cell._
-import com.phaller.rasync.lattice.{ DefaultKey, Key, Updater }
+import com.phaller.rasync.lattice._
 import com.phaller.rasync.pool.HandlerPool
 import com.phaller.rasync.test.lattice.IntUpdater
 import org.scalatest.FunSuite
@@ -53,6 +53,22 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
     Await.ready(pool.quiescentResolveCell, 2.seconds)
     assert(completer1.cell.isComplete)
     assert(completer1.cell.getResult() == 5)
+    pool.shutdown()
+  }
+
+  test("DefaultKey.fallback with additional depender") {
+    val k = new DefaultKey[Int]
+    implicit val pool = new HandlerPool[Int](k)
+    val completer1 = mkCompleter[Int]
+    val completer2 = mkCompleter[Int]
+    completer2.cell.when(_ => FinalOutcome(10), completer1.cell)
+    completer2.cell.trigger()
+    completer1.putNext(5)
+    Await.ready(pool.quiescentResolveCell, 2.seconds)
+    assert(completer1.cell.isComplete)
+    assert(completer1.cell.getResult() == 5)
+    assert(completer2.cell.isComplete)
+    assert(completer2.cell.getResult() == 10)
     pool.shutdown()
   }
 

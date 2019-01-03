@@ -92,7 +92,7 @@ trait Cell[V] {
    * @param value The value to put.
    * @param dontCall The cells that won't be informed about the update.
    */
-  private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[V]]): Unit
+  private[rasync] def resolveWithValue(value: Try[V], dontCall: Seq[Cell[V]]): Unit
   private[rasync] def isIndependent(): Boolean
 
   protected val sequential: Boolean
@@ -182,7 +182,7 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
   }
 
   /** Submit a queued sequential task to the handler pool. Continues submitting until the queue is empty. */
-  private def startSequentialTask() = {
+  private def startSequentialTask(): Unit = {
     val cell = this
     queuedCallbacks.get().headOption.foreach({
       case (prio, task) =>
@@ -257,8 +257,8 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
   }
 
   override def put(x: V, isFinal: Boolean): Unit = {
-    if (isFinal) putFinal(x)
-    else putNext(x)
+    if (isFinal) tryComplete(Success(x), None)
+    else tryNewState(x)
   }
 
   override def putFailure(x: Failure[V]): Unit = {
@@ -303,8 +303,8 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
       current.dependers.size
   }
 
-  override private[rasync] def resolveWithValue(value: V, dontCall: Seq[Cell[V]]): Unit = {
-    tryComplete(Success(value), Some(dontCall))
+  override private[rasync] def resolveWithValue(value: Try[V], dontCall: Seq[Cell[V]]): Unit = {
+    tryComplete(value, Some(dontCall))
   }
 
   @tailrec
