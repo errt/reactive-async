@@ -222,7 +222,10 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     // If any dependee is Impure, the dependent Cell is impure.
     // Otherwise, we do not know anything new.
     // Exception will be rethrown.
-    if (v.exists(_._2.get.value == Impure))
+    if (v.collectFirst({
+      case (_, scala.util.Success(FinalOutcome(Impure))) => true
+      case (_, scala.util.Failure(_)) => true
+    }).isDefined)
       FinalOutcome(Impure)
     else NoOutcome
   }
