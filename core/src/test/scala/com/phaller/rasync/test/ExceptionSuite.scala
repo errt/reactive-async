@@ -63,7 +63,7 @@ class ExceptionSuite extends FunSuite {
     val c0 = CellCompleter()
     val cell = pool.mkCell(c => {
       // build up dependency, throw exeption, if c0's value changes
-      c.when(_ => throw new Exception("foo"), c0.cell)
+      c.when(c0.cell)(_ => throw new Exception("foo"))
       NoOutcome
     })
 
@@ -97,7 +97,7 @@ class ExceptionSuite extends FunSuite {
     val c0 = CellCompleter()
     val cell = pool.mkSequentialCell(c => {
       // build up dependency, throw exeption, if c0's value changes
-      c.when(_ => throw new Exception("foo"), c0.cell)
+      c.when(c0.cell)(_ => throw new Exception("foo"))
       NoOutcome
     })
 
@@ -145,12 +145,12 @@ class ExceptionSuite extends FunSuite {
     val c4 = CellCompleter()
 
     // Create a cSSC
-    c1.cell.when(_ => NoOutcome, c0.cell)
-    c2.cell.when(_ => NoOutcome, c1.cell)
-    c3.cell.when(_ => NoOutcome, c1.cell)
-    c4.cell.when(_ => NoOutcome, c2.cell)
-    c4.cell.when(_ => NoOutcome, c3.cell)
-    c0.cell.when(_ => NoOutcome, c4.cell)
+    c1.cell.when(c0.cell)(_ => NoOutcome)
+    c2.cell.when(c1.cell)(_ => NoOutcome)
+    c3.cell.when(c1.cell)(_ => NoOutcome)
+    c4.cell.when(c2.cell)(_ => NoOutcome)
+    c4.cell.when(c3.cell)(_ => NoOutcome)
+    c0.cell.when(c4.cell)(_ => NoOutcome)
 
     // wait for the cycle to be resolved by ExceptionKey.resolve
     Await.ready(pool.quiescentResolveCell, 2.seconds)
@@ -190,7 +190,7 @@ class ExceptionSuite extends FunSuite {
     triggerLatch.await()
 
     // Create a dependency, c1 "recover" from the exception in c0 by completing with 10
-    c1.cell.when(_ => FinalOutcome(10), c0.cell)
+    c1.cell.when(c0.cell)(_ => FinalOutcome(10))
 
     // wait for c0 to be resolved by ExceptionKey.fallback
     Await.ready(pool.quiescentResolveCell, 2.seconds)
@@ -217,8 +217,8 @@ class ExceptionSuite extends FunSuite {
     val c2 = CellCompleter()
 
     // Create a dependency, c1 "recover" from the exception in c0 by completing with 10
-    c2.cell.when(_ => FinalOutcome(10), c0.cell)
-    c2.cell.when(_ => throw new Exception("BOOM"), c1.cell)
+    c2.cell.when(c0.cell)(_ => FinalOutcome(10))
+    c2.cell.when(c1.cell)(_ => throw new Exception("BOOM"))
     c2.cell.onComplete(_ => latch.countDown())
 
     // trigger completion of cell2
@@ -248,8 +248,8 @@ class ExceptionSuite extends FunSuite {
     val c2 = CellCompleter()
 
     // Create dependencies
-    c2.cell.when(_ => FinalOutcome(10), c0.cell)
-    c2.cell.when(_ => throw new Exception("foo"), c1.cell)
+    c2.cell.when(c0.cell)(_ => FinalOutcome(10))
+    c2.cell.when(c1.cell)(_ => throw new Exception("foo"))
     c2.cell.onComplete(_ => latch.countDown())
 
     c1.putFinal(1)
@@ -281,7 +281,7 @@ class ExceptionSuite extends FunSuite {
     val c0 = CellCompleter()
     val cell = pool.mkCell(c => {
       // build up dependency, throw error, if c0's value changes
-      c.when(_ => throw new Error("It's OK, if I am not caught. See description"), c0.cell)
+      c.when(c0.cell)(_ => throw new Error("It's OK, if I am not caught. See description"))
       NoOutcome
     })
 

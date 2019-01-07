@@ -213,7 +213,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     if (dependencies.isEmpty) {
       FinalOutcome(Pure)
     } else {
-      cell.when(c, dependencies.map(methodToCell).toSeq: _*)
+      cell.when(dependencies.map(methodToCell).toSeq: _*)(c)
       NextOutcome(UnknownPurity) // == NoOutcome
     }
   }

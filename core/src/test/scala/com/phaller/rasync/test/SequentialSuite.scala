@@ -28,7 +28,7 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
       val tmpCompleter = mkCompleter[Int]
 
       // let cell1 depend on the predecessor tmpCompleter
-      cell1.when(it => {
+      cell1.when(tmpCompleter.cell)(it => {
         val x = it.head._2
         assert(runningCallbacks.incrementAndGet() == 1)
         Thread.`yield`()
@@ -39,7 +39,7 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
         }
         assert(runningCallbacks.decrementAndGet() == 0)
         Outcome(x.get.value * n, x.get.value == n)
-      }, tmpCompleter.cell)
+      })
 
       cell1.onComplete(_ => {
         latch.countDown()
@@ -88,7 +88,7 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
 
     for (i <- 1 to n) {
       val completer2 = mkCompleter[Set[Int]]
-      cell1.when(_ => {
+      cell1.when(completer2.cell)(_ => {
         count = count ++ Set(count.size)
         Thread.`yield`()
         try {
@@ -97,7 +97,7 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
           case _: InterruptedException => /* ignore */
         }
         Outcome(count, count.size == n)
-      }, completer2.cell)
+      })
       pool.execute(() => completer2.putNext(Set(i)))
     }
 

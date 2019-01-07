@@ -315,9 +315,9 @@ object Taint extends IFDSPropertyMetaInformation[Fact] {
 
 class TestTaintAnalysisRunner extends FunSuite {
 
-  test("main") {
-    main(null)
-  }
+//  test("main") {
+//    main(null)
+//  }
 
   def main(args: Array[String]): Unit = {
 

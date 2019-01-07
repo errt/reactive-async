@@ -50,7 +50,7 @@ trait Cell[V] {
    * @param valueCallback  Callback that receives the new value of `other` and returns an `Outcome` for `this` cell.
    * @param other*  Cells that `this` Cell depends on.
    */
-  def when(valueCallback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V], other: Cell[V]*): Unit
+  def when(other: Cell[V]*)(valueCallback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V]): Unit
 
   // internal API
 
@@ -308,7 +308,7 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
   }
 
   @tailrec
-  override final def when(valueCallback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V], other: Cell[V]*): Unit = state.get match {
+  override final def when(other: Cell[V]*)(valueCallback: Iterable[(Cell[V], Try[ValueOutcome[V]])] => Outcome[V]): Unit = state.get match {
     case _: FinalState[V] => // completed with final result
     // do not add dependency
     // in fact, do nothing
@@ -324,7 +324,7 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
           c.addDependentCell(this)
           pool.triggerExecution(c)
         })
-      } else when(valueCallback, other: _*)
+      } else when(other: _*)(valueCallback)
   }
 
   @tailrec

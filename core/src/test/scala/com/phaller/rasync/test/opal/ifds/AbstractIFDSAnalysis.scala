@@ -272,7 +272,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: 
       FinalOutcome(createProperty(result))
     } else {
       val thisCell = cell(state.source)
-      thisCell.when(cont, dependees.keys.toSeq: _*)
+      thisCell.when(dependees.keys.toSeq: _*)(cont)
       NextOutcome(createProperty(result))
     }
   }
@@ -621,7 +621,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: 
 
     val decl = declaredMethods(source._1.definedMethod)
     val baseCell = cell((decl, sourceFact))
-    thisCell.when(_.head._2.get, baseCell)
+    thisCell.when(baseCell)(_.head._2.get)
 
     NoOutcome // we do not have any information yet but solely depend on the base class
   }

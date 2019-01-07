@@ -27,8 +27,8 @@ class InternalBaseSuite extends FunSuite {
     val completer2 = CellCompleter[Int]()
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.when(if10thenFinal20, cell2)
-    cell1.when(if10thenFinal20, cell2)
+    cell1.when(cell2)(if10thenFinal20)
+    cell1.when(cell2)(if10thenFinal20)
 
     assert(cell1.numDependencies == 1)
     assert(cell2.numDependencies == 0)
@@ -40,8 +40,8 @@ class InternalBaseSuite extends FunSuite {
     val completer2 = CellCompleter[Int]()
     val cell1 = completer1.cell
     val cell2 = completer2.cell
-    cell1.when(if10thenFinal20, cell2)
-    cell1.when(if10thenFinal20, cell2)
+    cell1.when(cell2)(if10thenFinal20)
+    cell1.when(cell2)(if10thenFinal20)
 
     completer1.putFinal(0)
 
