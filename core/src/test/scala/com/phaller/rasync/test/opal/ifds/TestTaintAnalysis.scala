@@ -43,7 +43,7 @@ class TestTaintAnalysis(
   parallelism: Int = Runtime.getRuntime.availableProcessors(),
   scheduling: SchedulingStrategy = DefaultScheduling)(
   implicit
-  val project: SomeProject) extends AbstractIFDSAnalysis[Fact](parallelism, scheduling) {
+  val project: SomeProject) extends AbstractIFDSAnalysis[Fact](parallelism, scheduling)(project) {
 
   override val property: IFDSPropertyMetaInformation[Fact] = Taint
 
@@ -291,7 +291,7 @@ class TestTaintAnalysis(
   }
 
   val entryPoints: Map[DeclaredMethod, Fact] = (for {
-    m ← p.allMethodsWithBody
+    m ← project.allMethodsWithBody
     if (m.isPublic || m.isProtected) && (m.descriptor.returnType == ObjectType.Object || m.descriptor.returnType == ObjectType.Class)
     index ← m.descriptor.parameterTypes.zipWithIndex.collect { case (pType, index) if pType == ObjectType.String ⇒ index }
   } //yield (declaredMethods(m), null)

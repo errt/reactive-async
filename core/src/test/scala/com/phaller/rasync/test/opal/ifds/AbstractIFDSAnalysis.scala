@@ -11,8 +11,7 @@ import scala.collection.{ Set => SomeSet }
 import org.opalj.br.DeclaredMethod
 import org.opalj.br.Method
 import org.opalj.br.ObjectType
-import org.opalj.br.analyses.DeclaredMethods
-import org.opalj.br.analyses.DeclaredMethodsKey
+import org.opalj.br.analyses.{ DeclaredMethods, DeclaredMethodsKey, Project }
 import org.opalj.br.cfg.BasicBlock
 import org.opalj.br.cfg.CFG
 import org.opalj.br.cfg.CFGNode
@@ -55,7 +54,7 @@ import scala.util.Try
  * @author Jan Kölzer (adaption to Reactive Async)
  */
 // The `scheduling` is only for testing. In production, one would create a HandlerPool with the best scheduling for IFDS
-abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: SchedulingStrategy) extends FPCFAnalysis {
+abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: SchedulingStrategy)(implicit project: Project[_]) {
 
   private val tacProvider: Method ⇒ TACode[TACMethodParameter, DUVar[ValueInformation]] = project.get(DefaultTACAIKey)
 
