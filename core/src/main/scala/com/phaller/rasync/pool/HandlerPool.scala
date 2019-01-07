@@ -155,7 +155,7 @@ class HandlerPool[V](
       val waitAgain: Boolean =
         if (independent.nonEmpty) {
           // Resolve independent cells with fallback values
-          resolveDefault(independent)
+          resolveIndependent(independent)
         } else {
           // Otherwise, find and resolve closed strongly connected components and resolve them.
 
@@ -190,7 +190,7 @@ class HandlerPool[V](
   /**
    * Resolves a cell with default value with the key's `fallback` method.
    */
-  private def resolveDefault(cells: Iterable[Cell[V]]): Boolean =
+  private def resolveIndependent(cells: Iterable[Cell[V]]): Boolean =
     resolve(cells, key.fallback)
 
   /** Resolve all cells with the associated value. */
@@ -198,12 +198,12 @@ class HandlerPool[V](
     try {
       val results = k(cells)
       val dontCall = results.map(_._1).toSeq
-      for ((c, v) <- results; t = Success(v))
+      for ((c, v) <- results)
         execute(new Runnable {
           override def run(): Unit = {
             // resolve each cell with the given value
             // but do not propagate among the cells in the same set (i.e. the same cSCC)
-            c.resolveWithValue(t, dontCall)
+            c.resolveWithValue(Success(v), dontCall)
           }
         }, schedulingStrategy.calcPriority(c))
       results.nonEmpty
@@ -212,7 +212,8 @@ class HandlerPool[V](
         // if an exception occurs, resolve all cells with a failure
         val f = Failure(e)
         val dontCall = cells.toSeq
-        cells.foreach(_.resolveWithValue(f, dontCall))
+        cells.foreach(c =>
+          execute(() => c.resolveWithValue(f, dontCall)))
         cells.nonEmpty
     }
   }
