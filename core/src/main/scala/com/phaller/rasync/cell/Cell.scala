@@ -4,13 +4,14 @@ package cell
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
 
+import com.phaller.rasync.util.Counter
 import lattice.Updater
 import pool.HandlerPool
 
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.TimeUnit
-import scala.util.{ Failure, Success, Try }
+import scala.util.{Failure, Success, Try}
 
 trait Cell[V] {
   private[rasync] val completer: CellCompleter[V]
@@ -361,46 +362,60 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
    * if it fails.
    */
   @tailrec
-  private[rasync] final def tryNewState(value: V): Unit = state.get match {
-    case _: FinalState[V] => // completed with final result already
-    // As decided by phaller, we ignore all updates after freeze and do not throw exceptions
+  private[rasync] final def tryNewState(value: V): Unit = {
+    Counter.inc("Cell.tryNewState.invocations")
+    state.get match {
+      case _: FinalState[V] => // completed with final result already
+      // As decided by phaller, we ignore all updates after freeze and do not throw exceptions
+        Counter.inc("Cell.tryNewState.onFinalState")
 
-    case current: IntermediateState[V] => // not completed
-      val updatedValue = current.res.map(tryJoin(_, value)).asInstanceOf[Success[V]]
-      // We only have to continue, if the updated value actually changes the cell;
-      // If value is lower or equal current.res, nothing changes.
-      if (updatedValue != current.res) {
-        val newState = new IntermediateState[V](updatedValue, current.tasksActive, current.dependees, current.dependers)
-        if (state.compareAndSet(current, newState)) {
-          // We have a new value. Inform dependers
-          current.dependers.foreach(_.addUpdate(this))
-          onNextHandler.foreach(_.apply(updatedValue))
-        } else tryNewState(value) // CAS failed, try again
-      }
+      case current: IntermediateState[V] => // not completed
+        val updatedValue = current.res.map(tryJoin(_, value)).asInstanceOf[Success[V]]
+        // We only have to continue, if the updated value actually changes the cell;
+        // If value is lower or equal current.res, nothing changes.
+        if (updatedValue != current.res) {
+          val newState = new IntermediateState[V](updatedValue, current.tasksActive, current.dependees, current.dependers)
+          if (state.compareAndSet(current, newState)) {
+            // We have a new value. Inform dependers
+            current.dependers.foreach(_.addUpdate(this))
+            onNextHandler.foreach(_.apply(updatedValue))
+          } else {
+            Counter.inc("Cell.tryNewState.CAS-failure")
+            tryNewState(value)
+          } // CAS failed, try again
+        }
+    }
   }
 
-  private[rasync] override def tryComplete(value: Try[V], dontCall: Option[Seq[Cell[V]]]): Unit = state.get match {
-    case _: FinalState[V] => // completed with final result already
-    // As decided by phaller, we ignore all updates after freeze and do not throw exceptions
+  private[rasync] override def tryComplete(value: Try[V], dontCall: Option[Seq[Cell[V]]]): Unit = {
+    Counter.inc("Cell.tryComplete.invocations")
+    state.get match {
+      case _: FinalState[V] => // completed with final result already
+      // As decided by phaller, we ignore all updates after freeze and do not throw exceptions
+        Counter.inc("Cell.tryComplete.onFinalState")
 
-    case current: IntermediateState[V] => // not completed
+      case current: IntermediateState[V] => // not completed
 
-      val updatedValue: Try[V] = value.map(tryJoin(current.res.value, _))
-      val newState = new FinalState[V](updatedValue)
-      if (state.compareAndSet(current, newState)) {
-        // Cell has been completed successfully
-        // Other cells do not need to call us any more
-        current.dependees.keys.foreach(_.removeDependentCell(this))
+        val updatedValue: Try[V] = value.map(tryJoin(current.res.value, _))
+        val newState = new FinalState[V](updatedValue)
+        if (state.compareAndSet(current, newState)) {
+          // Cell has been completed successfully
+          // Other cells do not need to call us any more
+          current.dependees.keys.foreach(_.removeDependentCell(this))
 
-        // Inform all dependent cells, but not those that have been resolved in the same cycle.
-        val toCall = dontCall.map(current.dependers -- _).getOrElse(current.dependers)
-        toCall.foreach(_.addUpdate(this))
+          // Inform all dependent cells, but not those that have been resolved in the same cycle.
+          val toCall = dontCall.map(current.dependers -- _).getOrElse(current.dependers)
+          toCall.foreach(_.addUpdate(this))
 
-        // for testing
-        onNextHandler.foreach(_.apply(updatedValue))
-        onCompleteHandler.foreach(_.apply(updatedValue))
-        nodepslatch.countDown() // we do not have any deps left
-      } else tryComplete(value, dontCall) // CAS failed, try again
+          // for testing
+          onNextHandler.foreach(_.apply(updatedValue))
+          onCompleteHandler.foreach(_.apply(updatedValue))
+          nodepslatch.countDown() // we do not have any deps left
+        } else {
+          Counter.inc("Cell.tryComplete.CAS-failure")
+          tryComplete(value, dontCall)
+        } // CAS failed, try again
+    }
   }
 
   override private[rasync] def addUpdate(dependee: Cell[V]): Unit = state.get() match {

@@ -4,14 +4,15 @@ package pool
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicReference
 
-import cell.{ Cell, CellCompleter, NoOutcome, Outcome }
-import lattice.{ DefaultKey, Key, Updater }
+import cell.{Cell, CellCompleter, NoOutcome, Outcome}
+import com.phaller.rasync.util.Counter
+import lattice.{DefaultKey, Key, Updater}
 import org.opalj.graphs._
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
-import scala.concurrent.{ Future, Promise }
-import scala.util.{ Failure, Success }
+import scala.concurrent.{Future, Promise}
+import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 
 /* Need to have reference equality for CAS.
@@ -143,6 +144,7 @@ class HandlerPool[V](
    *         The boolean parameter indicates if cycles have been resolved or not.
    */
   def quiescentResolveCell: Future[Unit] = {
+    Counter.inc("HandlerPool.quiesenceResolveCell")
     val p = Promise[Unit]
     this.onQuiescent { () =>
       deregisterCompletedCells()
@@ -173,6 +175,7 @@ class HandlerPool[V](
       // Wait again for quiescent state. It's possible that other tasks where scheduled while
       // resolving the cells.
       if (waitAgain) {
+        Counter.inc("HandlerPool.quiesenceResolveCell.waitAgain")
         p.completeWith(quiescentResolveCell)
       } else {
         p.success(())
@@ -184,14 +187,19 @@ class HandlerPool[V](
   /**
    * Resolves a cycle of unfinished cells via the key's `resolve` method.
    */
-  private def resolveCycle(cells: Iterable[Cell[V]]): Boolean =
+  private def resolveCycle(cells: Iterable[Cell[V]]): Boolean = {
+    Counter.inc("HandlerPool.resolveCycle.invocations")
+    Counter.inc("HandlerPool.resolveCycle.cells", cells.size)
     resolve(cells, key.resolve)
+  }
 
   /**
    * Resolves a cell with default value with the key's `fallback` method.
    */
-  private def resolveIndependent(cells: Iterable[Cell[V]]): Boolean =
+  private def resolveIndependent(cells: Iterable[Cell[V]]): Boolean = {
+    Counter.inc("HandlerPool.resolveIndependent.invocations")
     resolve(cells, key.fallback)
+  }
 
   /** Resolve all cells with the associated value. */
   private def resolve(cells: Iterable[Cell[V]], k: (Iterable[Cell[V]]) => Iterable[(Cell[V], V)]): Boolean = {
@@ -223,12 +231,14 @@ class HandlerPool[V](
    * Change the PoolState accordingly.
    */
   private def incSubmittedTasks(): Unit = {
+    Counter.inc("HandlerPool.incSubmittedTasks.invocations")
     var submitSuccess = false
     while (!submitSuccess) {
       val state = poolState.get()
       val newState = new PoolState(state.handlers, state.submittedTasks + 1)
       submitSuccess = poolState.compareAndSet(state, newState)
     }
+    Counter.inc("HandlerPool.incSubmittedTasks.v."+poolState.get().submittedTasks)
   }
 
   /**

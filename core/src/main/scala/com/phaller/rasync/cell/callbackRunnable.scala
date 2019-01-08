@@ -3,11 +3,12 @@ package cell
 
 import java.util.concurrent.atomic.AtomicReference
 
+import com.phaller.rasync.util.Counter
 import pool.HandlerPool
 
 import scala.annotation.tailrec
 import scala.concurrent.OnCompleteRunnable
-import scala.util.{ Failure, Success, Try }
+import scala.util.{Failure, Success, Try}
 
 /**
  * CallbackRunnables are tasks that need to be run, when a value of a cell changes, that
@@ -32,6 +33,7 @@ private[rasync] abstract class CallbackRunnable[V] extends Runnable with OnCompl
 
   @tailrec
   final def addUpdate(other: Cell[V]): Unit = {
+    Counter.inc("CallbackRunnable.addUpdate.invocations")
     val oldUpdatedDependees = updatedDependees.get
     val newUpdatedDependees = oldUpdatedDependees + other
     if (updatedDependees.compareAndSet(oldUpdatedDependees, newUpdatedDependees)) {
@@ -46,8 +48,12 @@ private[rasync] abstract class CallbackRunnable[V] extends Runnable with OnCompl
       // The first incoming update (since the last execution) starts this runnable.
       // Other cells might still be added to updatedDependees concurrently, the runnable
       // will collect all updates and forward them altogether.
-      if (oldUpdatedDependees.isEmpty)
+      if (oldUpdatedDependees.isEmpty) {
+        Counter.inc("CallbackRunnable.addUpdate.triggerExecution")
         pool.execute(this, prio)
+      } else {
+        Counter.inc("CallbackRunnable.addUpdate.aggregations")
+      }
     } else addUpdate(other) // retry
   }
 
@@ -60,7 +66,7 @@ private[rasync] abstract class CallbackRunnable[V] extends Runnable with OnCompl
 
   protected def callCallback(): Unit = {
     if (!dependentCompleter.cell.isComplete) {
-
+      Counter.inc("CallbackRunnable.callCallback.calling")
       try {
         // Remove all updates from the list of updates that need to be handled – they will now be handled
         val dependees = updatedDependees.getAndSet(Set.empty)
@@ -99,6 +105,8 @@ private[rasync] abstract class CallbackRunnable[V] extends Runnable with OnCompl
         case e: Exception =>
           dependentCompleter.putFailure(Failure(e))
       }
+    } else {
+      Counter.inc("CallbackRunnable.callCallback.alreadyCompletedDepender")
     }
   }
 }
