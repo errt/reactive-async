@@ -71,6 +71,7 @@ private[rasync] abstract class CallbackRunnable[V] extends Runnable with OnCompl
         // Remove all updates from the list of updates that need to be handled – they will now be handled
         val dependees = updatedDependees.getAndSet(Set.empty)
         val propagations = dependees.map(c => (c, c.getState()))
+        Counter.inc("CallbackRunnable.callCallback.calling.numProps." + Math.round(Math.log10(propagations.size) + 1))
 
         val depsRemoved = // see below for depsRemoved
           callback(propagations) match {
