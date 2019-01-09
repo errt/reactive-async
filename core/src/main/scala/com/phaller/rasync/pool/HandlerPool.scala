@@ -238,7 +238,7 @@ class HandlerPool[V](
       val newState = new PoolState(state.handlers, state.submittedTasks + 1)
       submitSuccess = poolState.compareAndSet(state, newState)
     }
-    Counter.inc("HandlerPool.incSubmittedTasks.v."+poolState.get().submittedTasks)
+    Counter.inc("HandlerPool.incSubmittedTasks.v." + Math.round(Math.log10(poolState.get().submittedTasks) + 1))
   }
 
   /**

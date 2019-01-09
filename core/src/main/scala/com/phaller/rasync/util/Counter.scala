@@ -20,6 +20,10 @@ object Counter {
     profilingCounter.getOrElse(key, new AtomicLong(0)).get()
   }
 
+  def reset(): Unit = {
+    profilingCounter.clear()
+  }
+
   override def toString: String = {
     val counters = s"\tCounters\n" +
       f"\t\t${"Number"}%10s  ${"Name"}%-90s\n" +

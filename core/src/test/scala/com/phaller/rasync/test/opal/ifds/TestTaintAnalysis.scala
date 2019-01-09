@@ -4,21 +4,22 @@ package com.phaller.rasync.test.opal.ifds
 import java.net.URL
 
 import com.phaller.rasync.pool._
+import com.phaller.rasync.util.Counter
 import org.opalj.collection.immutable.RefArray
 import org.opalj.br.DeclaredMethod
 import org.opalj.br.ObjectType
 import org.opalj.br.Method
 import org.opalj.br.analyses.SomeProject
 import org.opalj.br.analyses.Project
-import org.opalj.fpcf.{ PropertyKey, PropertyStore, PropertyStoreContext, PropertyStoreKey }
+import org.opalj.fpcf.{PropertyKey, PropertyStore, PropertyStoreContext, PropertyStoreKey}
 import org.opalj.fpcf.analyses.AbstractIFDSAnalysis.V
 import org.opalj.fpcf.analyses.Statement
-import org.opalj.fpcf.properties.{ IFDSProperty, IFDSPropertyMetaInformation }
+import org.opalj.fpcf.properties.{IFDSProperty, IFDSPropertyMetaInformation}
 import org.opalj.fpcf.seq.PKESequentialPropertyStore
 import org.opalj.bytecode.JRELibraryFolder
 import org.opalj.log.LogContext
 import org.opalj.tac._
-import org.opalj.util.{ Nanoseconds, PerformanceEvaluation }
+import org.opalj.util.{Nanoseconds, PerformanceEvaluation}
 import org.scalatest.FunSuite
 
 import scala.collection.immutable.ListSet
@@ -161,7 +162,7 @@ class TestTaintAnalysis(
       })
         println(s"Found flow: $stmt")
       Set.empty
-    } else if ((callee.descriptor.returnType eq ObjectType.Class) ||
+    } else if (true || (callee.descriptor.returnType eq ObjectType.Class) ||
       (callee.descriptor.returnType eq ObjectType.Object)) {
       in.collect {
         case Variable(index) ⇒ // Taint formal parameter if actual parameter is tainted
@@ -315,23 +316,25 @@ object Taint extends IFDSPropertyMetaInformation[Fact] {
 
 class TestTaintAnalysisRunner extends FunSuite {
 
-//  test("main") {
-//    main(null)
-//  }
+  test("main") {
+    main(null)
+  }
 
   def main(args: Array[String]): Unit = {
-
+    val stabilize = false
     val p0 = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
 
     for (
-      scheduling <- List(DefaultScheduling, OthersWithManySuccessorsFirst, OthersWithManySuccessorsLast, CellsWithManyPredecessorsFirst, CellsWithManyPredecessorsLast, CellsWithManySuccessorsFirst, CellsWithManySuccessorsLast, OthersWithManyPredecessorsFirst, OthersWithManyPredecessorsLast);
-      threads <- List(1, 2, 4, 8, 16, 32)
+      scheduling <- List(DefaultScheduling, /*OthersWithManySuccessorsFirst, OthersWithManySuccessorsLast, CellsWithManyPredecessorsFirst, */CellsWithManyPredecessorsLast, CellsWithManySuccessorsFirst/*, CellsWithManySuccessorsLast, OthersWithManyPredecessorsFirst, OthersWithManyPredecessorsLast*/);
+      threads <- List(8)
     ) {
+
       var result = 0
       var lastAvg = 0L
-      PerformanceEvaluation.time(2, 4, 3, {
 
+      def analysis() = {
         implicit val p: Project[URL] = p0.recreate()
+        Counter.reset()
 
         // Using PropertySore here is fine, it is not use during analysis
         p.getOrCreateProjectInformationKeyInitializationData(
@@ -361,8 +364,12 @@ class TestTaintAnalysisRunner extends FunSuite {
             case _ ⇒
           }
         }
+        println(Counter.toString)
         println(s"NUM RESULTS =  $result")
-      }) { (_, ts) ⇒
+      }
+
+      if(stabilize)
+        PerformanceEvaluation.time(2, 4, 3, analysis) { (_, ts) ⇒
         val sTs = ts.map(_.toSeconds).mkString(", ")
         val avg = ts.map(_.timeSpan).sum / ts.size
         if (lastAvg != avg) {
@@ -371,6 +378,8 @@ class TestTaintAnalysisRunner extends FunSuite {
           println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
         }
       }
+      else
+        PerformanceEvaluation.time(analysis){t => println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, t = $t")}
       println(s"AVG,${scheduling.getClass.getSimpleName},$threads,$lastAvg")
     }
   }
