@@ -8,7 +8,7 @@ import pool.HandlerPool
 
 import scala.annotation.tailrec
 import scala.concurrent.OnCompleteRunnable
-import scala.util.{Failure, Success, Try}
+import scala.util.{ Failure, Success, Try }
 
 /**
  * CallbackRunnables are tasks that need to be run, when a value of a cell changes, that

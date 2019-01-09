@@ -4,15 +4,15 @@ package pool
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicReference
 
-import cell.{Cell, CellCompleter, NoOutcome, Outcome}
+import cell.{ Cell, CellCompleter, NoOutcome, Outcome }
 import com.phaller.rasync.util.Counter
-import lattice.{DefaultKey, Key, Updater}
+import lattice.{ DefaultKey, Key, Updater }
 import org.opalj.graphs._
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
-import scala.concurrent.{Future, Promise}
-import scala.util.{Failure, Success}
+import scala.concurrent.{ Future, Promise }
+import scala.util.{ Failure, Success }
 import scala.util.control.NonFatal
 
 /* Need to have reference equality for CAS.

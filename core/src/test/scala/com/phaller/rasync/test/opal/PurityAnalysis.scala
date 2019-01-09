@@ -7,6 +7,7 @@ import java.net.URL
 import com.phaller.rasync.cell._
 import com.phaller.rasync.lattice.Updater
 import com.phaller.rasync.pool._
+import com.phaller.rasync.util.Counter
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -76,7 +77,7 @@ object PurityAnalysis {
 
       def analysis() = {
         implicit val p: Project[URL] = p0.recreate()
-        //Counter.reset()
+        Counter.reset()
 
         val report = PurityAnalysis.doAnalyzeMethod(p, List.empty, () => false)
         result = report.toConsoleString.split("\n").slice(0, 2).mkString("\n")

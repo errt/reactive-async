@@ -41,12 +41,17 @@ class Statstics[T] {
 
   private val data: ConcurrentLinkedQueue[T] = new ConcurrentLinkedQueue[T]()
 
+  def add(x: T) = data.add(x)
+
   def reset(): Unit = {
     data.clear()
   }
+
+  def toArray(): Array[T] = data.toArray.asInstanceOf[Array[T]]
 
   override def toString: String = {
     data.toArray.asInstanceOf[Array[T]].mkString("\n")
   }
 }
 
+object InOutStats extends Statstics[(Int, Int)]

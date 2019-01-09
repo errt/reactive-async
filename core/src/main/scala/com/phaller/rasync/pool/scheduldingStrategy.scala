@@ -1,6 +1,7 @@
 package com.phaller.rasync.pool
 
 import com.phaller.rasync.cell.Cell
+import com.phaller.rasync.util.InOutStats
 
 /**
  * A scheduling strategy defines priorities for dependency callbacks
@@ -29,13 +30,19 @@ trait SchedulingStrategy {
 
 /** All tasks are of equal priority. */
 object DefaultScheduling extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int = 0
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int = {
+    InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
+    0
+  }
   override def calcPriority[V](cell: Cell[V]): Int = 0
 }
 
 object OthersWithManySuccessorsFirst extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
-    -other.numDependentCells
+    {
+      InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
+      -other.numDependentCells
+    }
 
   override def calcPriority[V](cell: Cell[V]): Int =
     -cell.numDependentCells
@@ -43,7 +50,10 @@ object OthersWithManySuccessorsFirst extends SchedulingStrategy {
 
 object OthersWithManySuccessorsLast extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
-    other.numDependentCells
+    {
+      InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
+      other.numDependentCells
+    }
 
   override def calcPriority[V](cell: Cell[V]): Int =
     cell.numDependentCells
@@ -51,7 +61,10 @@ object OthersWithManySuccessorsLast extends SchedulingStrategy {
 
 object OthersWithManyPredecessorsFirst extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
-    -other.numDependencies
+    {
+      InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
+      -other.numDependencies
+    }
 
   override def calcPriority[V](cell: Cell[V]): Int =
     -cell.numDependencies
@@ -59,29 +72,38 @@ object OthersWithManyPredecessorsFirst extends SchedulingStrategy {
 
 object OthersWithManyPredecessorsLast extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
-    other.numDependencies
+    {
+      InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
+      other.numDependencies
+    }
 
   override def calcPriority[V](cell: Cell[V]): Int =
     cell.numDependencies
 }
 
 object CellsWithManyPredecessorsFirst extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int = {
+    InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
     -dependentCell.numDependencies
+  }
 
   override def calcPriority[V](cell: Cell[V]): Int = 0
 }
 
 object CellsWithManyPredecessorsLast extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int = {
+    InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
     dependentCell.numDependencies
+  }
 
   override def calcPriority[V](dependentCell: Cell[V]): Int = 0
 }
 
 object CellsWithManySuccessorsFirst extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int = {
+    InOutStats.add((dependentCell.numDependencies, dependentCell.numDependentCells))
     -dependentCell.numDependencies
+  }
 
   override def calcPriority[V](dependentCell: Cell[V]): Int = 0
 }

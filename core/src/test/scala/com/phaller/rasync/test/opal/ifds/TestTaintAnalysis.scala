@@ -1,10 +1,11 @@
 /* BSD 2-Clause License - see OPAL/LICENSE for details. */
 package com.phaller.rasync.test.opal.ifds
 
+import java.io.FileWriter
 import java.net.URL
 
 import com.phaller.rasync.pool._
-import com.phaller.rasync.util.Counter
+import com.phaller.rasync.util.{Counter, InOutStats}
 import org.opalj.collection.immutable.RefArray
 import org.opalj.br.DeclaredMethod
 import org.opalj.br.ObjectType
@@ -317,7 +318,7 @@ object Taint extends IFDSPropertyMetaInformation[Fact] {
 class TestTaintAnalysisRunner extends FunSuite {
 
   test("main") {
-//    main(null)
+    main(null)
   }
 
   def main(args: Array[String]): Unit = {
@@ -335,6 +336,7 @@ class TestTaintAnalysisRunner extends FunSuite {
       def analysis() = {
         implicit val p: Project[URL] = p0.recreate()
         Counter.reset()
+        InOutStats.reset()
 
         // Using PropertySore here is fine, it is not use during analysis
         p.getOrCreateProjectInformationKeyInitializationData(
@@ -366,6 +368,9 @@ class TestTaintAnalysisRunner extends FunSuite {
         }
         println(Counter.toString)
         println(s"NUM RESULTS =  $result")
+        val file = new FileWriter(s"Deps for $scheduling .log")
+        file.append(InOutStats.toArray().mkString("\n"))
+        file.close()
       }
 
       if(stabilize)
