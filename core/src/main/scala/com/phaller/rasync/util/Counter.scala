@@ -1,5 +1,6 @@
 package com.phaller.rasync.util
 
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.concurrent.TrieMap
@@ -35,3 +36,17 @@ object Counter {
     counters
   }
 }
+
+class Statstics[T] {
+
+  private val data: ConcurrentLinkedQueue[T] = new ConcurrentLinkedQueue[T]()
+
+  def reset(): Unit = {
+    data.clear()
+  }
+
+  override def toString: String = {
+    data.toArray.asInstanceOf[Array[T]].mkString("\n")
+  }
+}
+
