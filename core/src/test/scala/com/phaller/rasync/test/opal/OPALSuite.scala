@@ -14,7 +14,7 @@ class OPALSuite extends FunSuite {
     val file = new File("core")
     val lib = Project(file)
 
-    val report = PurityAnalysis.doAnalyze(lib, List.empty, () => false).toConsoleString.split("\n")
+    val report = PurityAnalysis.doAnalyzeMethod(lib, List.empty, () => false).toConsoleString.split("\n")
 
     val pureMethods = List(
       "pureness.Demo{ public static int pureThoughItUsesField(int,int) }",
@@ -43,7 +43,7 @@ class OPALSuite extends FunSuite {
     val file = new File("core")
     val lib = Project(file)
 
-    val report = PurityAnalysis.doAnalyze(lib, List.empty, () => false).toConsoleString.split("\n")
+    val report = PurityAnalysis.doAnalyzeMethod(lib, List.empty, () => false).toConsoleString.split("\n")
 
     val impureMethods = List(
       "public static int impure(int)",

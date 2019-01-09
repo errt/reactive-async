@@ -317,7 +317,7 @@ object Taint extends IFDSPropertyMetaInformation[Fact] {
 class TestTaintAnalysisRunner extends FunSuite {
 
   test("main") {
-    main(null)
+//    main(null)
   }
 
   def main(args: Array[String]): Unit = {
@@ -326,7 +326,7 @@ class TestTaintAnalysisRunner extends FunSuite {
 
     for (
       scheduling <- List(DefaultScheduling, /*OthersWithManySuccessorsFirst, OthersWithManySuccessorsLast, CellsWithManyPredecessorsFirst, */CellsWithManyPredecessorsLast, CellsWithManySuccessorsFirst/*, CellsWithManySuccessorsLast, OthersWithManyPredecessorsFirst, OthersWithManyPredecessorsLast*/);
-      threads <- List(8)
+      threads <- List( 8)
     ) {
 
       var result = 0
@@ -378,8 +378,9 @@ class TestTaintAnalysisRunner extends FunSuite {
           println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
         }
       }
-      else
-        PerformanceEvaluation.time(analysis){t => println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, t = $t")}
+      else {
+        PerformanceEvaluation.time(analysis) { t => println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, t = $t") }
+      }
       println(s"AVG,${scheduling.getClass.getSimpleName},$threads,$lastAvg")
     }
   }
