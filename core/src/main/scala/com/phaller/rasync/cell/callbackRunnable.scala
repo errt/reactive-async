@@ -36,6 +36,11 @@ private[rasync] abstract class CallbackRunnable[V] extends Runnable with OnCompl
     Counter.inc("CallbackRunnable.addUpdate.invocations")
     val oldUpdatedDependees = updatedDependees.get
     val newUpdatedDependees = oldUpdatedDependees + other
+    if (oldUpdatedDependees.size != newUpdatedDependees.size) {
+      Counter.inc("CallbackRunnable.addUpdate.invocations.addedDependees")
+    } else {
+      Counter.inc("CallbackRunnable.addUpdate.invocations.updatedResults")
+    }
     if (updatedDependees.compareAndSet(oldUpdatedDependees, newUpdatedDependees)) {
 
       // We store a priority for sequential execution of this callbackRunnable.
