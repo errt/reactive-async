@@ -213,7 +213,7 @@ class HandlerPool[V](
         val f = Failure(e)
         val dontCall = cells.toSeq
         cells.foreach(c =>
-          execute(() => c.resolveWithValue(f, dontCall)))
+          execute(() => c.resolveWithValue(f, dontCall), schedulingStrategy.calcPriority(c)))
         cells.nonEmpty
     }
   }
