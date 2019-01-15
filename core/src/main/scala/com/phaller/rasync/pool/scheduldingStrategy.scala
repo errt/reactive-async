@@ -33,7 +33,7 @@ object DefaultScheduling extends SchedulingStrategy {
   override def calcPriority[V](cell: Cell[V]): Int = 0
 }
 
-object OthersWithManySuccessorsFirst extends SchedulingStrategy {
+object SourcesWithManyTargetsFirst extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     -other.numDependentCells
 
@@ -41,7 +41,7 @@ object OthersWithManySuccessorsFirst extends SchedulingStrategy {
     -cell.numDependentCells
 }
 
-object OthersWithManySuccessorsLast extends SchedulingStrategy {
+object SourcesWithManyTargetsLast extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     other.numDependentCells
 
@@ -49,7 +49,7 @@ object OthersWithManySuccessorsLast extends SchedulingStrategy {
     cell.numDependentCells
 }
 
-object OthersWithManyPredecessorsFirst extends SchedulingStrategy {
+object SourcesWithManySourcesFirst extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     -other.numDependencies
 
@@ -57,7 +57,7 @@ object OthersWithManyPredecessorsFirst extends SchedulingStrategy {
     -cell.numDependencies
 }
 
-object OthersWithManyPredecessorsLast extends SchedulingStrategy {
+object SourcesWithManySourcesLast extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     other.numDependencies
 
@@ -65,28 +65,28 @@ object OthersWithManyPredecessorsLast extends SchedulingStrategy {
     cell.numDependencies
 }
 
-object CellsWithManyPredecessorsFirst extends SchedulingStrategy {
+object TargetsWithManySourcesFirst extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     -dependentCell.numDependencies
 
   override def calcPriority[V](cell: Cell[V]): Int = 0
 }
 
-object CellsWithManyPredecessorsLast extends SchedulingStrategy {
+object TargetsWithManySourcesLast extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     dependentCell.numDependencies
 
   override def calcPriority[V](dependentCell: Cell[V]): Int = 0
 }
 
-object CellsWithManySuccessorsFirst extends SchedulingStrategy {
+object TargetsWithManyTargetsFirst extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     -dependentCell.numDependencies
 
   override def calcPriority[V](dependentCell: Cell[V]): Int = 0
 }
 
-object CellsWithManySuccessorsLast extends SchedulingStrategy {
+object TargetsWithManyTargetsLast extends SchedulingStrategy {
   override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
     dependentCell.numDependentCells
 
