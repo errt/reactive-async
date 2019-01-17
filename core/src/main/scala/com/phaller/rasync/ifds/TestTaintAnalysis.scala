@@ -1,29 +1,25 @@
 /* BSD 2-Clause License - see OPAL/LICENSE for details. */
-package com.phaller.rasync.test.opal.ifds
+package com.phaller.rasync.ifds
 
 import java.net.URL
 
+import com.phaller.rasync.ifds.AbstractIFDSAnalysis.V
 import com.phaller.rasync.pool._
+import org.opalj.br.analyses.{Project, SomeProject}
+import org.opalj.br.{DeclaredMethod, Method, ObjectType}
 import org.opalj.collection.immutable.RefArray
-import org.opalj.br.DeclaredMethod
-import org.opalj.br.ObjectType
-import org.opalj.br.Method
-import org.opalj.br.analyses.SomeProject
-import org.opalj.br.analyses.Project
-import org.opalj.fpcf.{ PropertyKey, PropertyStore, PropertyStoreContext, PropertyStoreKey }
-import org.opalj.fpcf.analyses.AbstractIFDSAnalysis.V
+import org.opalj.fpcf.{PropertyKey, PropertyStore, PropertyStoreContext, PropertyStoreKey}
 import org.opalj.fpcf.analyses.Statement
-import org.opalj.fpcf.properties.{ IFDSProperty, IFDSPropertyMetaInformation }
+import org.opalj.fpcf.properties.{IFDSProperty, IFDSPropertyMetaInformation}
 import org.opalj.fpcf.seq.PKESequentialPropertyStore
-import org.opalj.bytecode.JRELibraryFolder
 import org.opalj.log.LogContext
 import org.opalj.tac._
-import org.opalj.util.{ Nanoseconds, PerformanceEvaluation }
-import org.scalatest.FunSuite
+import org.opalj.util.PerformanceEvaluation
 
 import scala.collection.immutable.ListSet
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
+import scala.util.Try
 
 trait Fact
 
@@ -313,23 +309,27 @@ object Taint extends IFDSPropertyMetaInformation[Fact] {
     new Taint(Map.empty))
 }
 
-class TestTaintAnalysisRunner extends FunSuite {
-
-//  test("main") {
-//    main(null)
-//  }
+object TestTaintAnalysisRunner {
 
   def main(args: Array[String]): Unit = {
 
-    val p0 = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
+    val p0 = Project(new java.io.File(org.opalj.bytecode.JRELibraryFolder.getAbsolutePath))
+    val threads = Try(Integer.parseInt(args(0))).getOrElse(8)
+    val scheduling = args(1) match {
+      case "DefaultScheduling" => DefaultScheduling
+      case "SourcesWithManyTargetsFirst" => SourcesWithManyTargetsFirst
+      case "SourcesWithManyTargetsLast" => SourcesWithManyTargetsLast
+      case "TargetsWithManySourcesFirst" => TargetsWithManySourcesFirst
+      case "TargetsWithManySourcesLast" => TargetsWithManySourcesLast
+      case "TargetsWithManyTargetsFirst" => TargetsWithManyTargetsFirst
+      case "TargetsWithManyTargetsLast" => TargetsWithManyTargetsLast
+      case "SourcesWithManySourcesFirst" => SourcesWithManySourcesFirst
+      case "SourcesWithManySourcesLast"  => SourcesWithManySourcesLast
+      case _ => DefaultScheduling
+    }
 
-    for (
-      scheduling <- List(DefaultScheduling, SourcesWithManyTargetsFirst, SourcesWithManyTargetsLast, TargetsWithManySourcesFirst, TargetsWithManySourcesLast, TargetsWithManyTargetsFirst, TargetsWithManyTargetsLast, SourcesWithManySourcesFirst, SourcesWithManySourcesLast);
-      threads <- List(1, 2, 4, 8, 16, 32)
-    ) {
-      var result = 0
-      var lastAvg = 0L
-      PerformanceEvaluation.time(2, 4, 3, {
+    var result = 0
+      PerformanceEvaluation.time( {
 
         implicit val p: Project[URL] = p0.recreate()
 
@@ -351,7 +351,6 @@ class TestTaintAnalysisRunner extends FunSuite {
         entryPoints.foreach(analysis.forceComputation)
         analysis.waitForCompletion()
 
-        result = 0
         for {
           e ← entryPoints
           fact ← analysis.getResult(e).flows.values.flatten.toSet[Fact]
@@ -361,17 +360,9 @@ class TestTaintAnalysisRunner extends FunSuite {
             case _ ⇒
           }
         }
-        println(s"NUM RESULTS =  $result")
-      }) { (_, ts) ⇒
-        val sTs = ts.map(_.toSeconds).mkString(", ")
-        val avg = ts.map(_.timeSpan).sum / ts.size
-        if (lastAvg != avg) {
-          lastAvg = avg
-          val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
-          println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
-        }
+      }) { t ⇒
+        println(s"AVG,$result,${scheduling.getClass.getSimpleName},$threads,$t")
       }
-      println(s"AVG,${scheduling.getClass.getSimpleName},$threads,$lastAvg")
     }
-  }
+
 }

@@ -1,48 +1,24 @@
 /* BSD 2-Clause License - see OPAL/LICENSE for details. */
-package com.phaller.rasync.test.opal.ifds
+package com.phaller.rasync.ifds
 
 import java.util.concurrent.ConcurrentHashMap
 
-import com.phaller.rasync.lattice.{ Key, Lattice }
 import com.phaller.rasync.cell._
-import com.phaller.rasync.pool.{ HandlerPool, SchedulingStrategy }
-
-import scala.collection.{ Set => SomeSet }
-import org.opalj.br.DeclaredMethod
-import org.opalj.br.Method
-import org.opalj.br.ObjectType
-import org.opalj.br.analyses.{ DeclaredMethods, DeclaredMethodsKey, Project }
-import org.opalj.br.cfg.BasicBlock
-import org.opalj.br.cfg.CFG
-import org.opalj.br.cfg.CFGNode
-import org.opalj.fpcf.FPCFAnalysis
-import org.opalj.fpcf.analyses.AbstractIFDSAnalysis.V
+import com.phaller.rasync.ifds.AbstractIFDSAnalysis.V
+import com.phaller.rasync.lattice.{Key, Lattice}
+import com.phaller.rasync.pool.{HandlerPool, SchedulingStrategy}
+import org.opalj.br.{DeclaredMethod, Method, ObjectType}
+import org.opalj.br.analyses.{DeclaredMethods, DeclaredMethodsKey, Project}
+import org.opalj.br.cfg.{BasicBlock, CFG, CFGNode}
 import org.opalj.fpcf.analyses.Statement
-import org.opalj.fpcf.properties.IFDSProperty
-import org.opalj.fpcf.properties.IFDSPropertyMetaInformation
-import org.opalj.tac.DUVar
-import org.opalj.tac.Stmt
-import org.opalj.tac.VirtualMethodCall
-import org.opalj.tac.NonVirtualMethodCall
-import org.opalj.tac.StaticMethodCall
-import org.opalj.tac.Assignment
-import org.opalj.tac.StaticFunctionCall
-import org.opalj.tac.NonVirtualFunctionCall
-import org.opalj.tac.VirtualFunctionCall
-import org.opalj.tac.TACStmts
-import org.opalj.tac.Expr
-import org.opalj.tac.Call
-import org.opalj.tac.ExprStmt
-import org.opalj.tac.TACode
-import org.opalj.tac.TACMethodParameter
-import org.opalj.tac.DefaultTACAIKey
+import org.opalj.fpcf.properties.{IFDSProperty, IFDSPropertyMetaInformation}
+import org.opalj.tac._
+import org.opalj.value.ValueInformation
 
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable
+import scala.collection.{mutable, Set => SomeSet}
 import scala.concurrent.duration.Duration
-import org.opalj.value.ValueInformation
-
 import scala.util.Try
 
 /**
