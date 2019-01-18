@@ -43,9 +43,21 @@ import org.opalj.br.instructions.INVOKESPECIAL
 import org.opalj.br.instructions.INVOKEVIRTUAL
 import org.opalj.br.instructions.INVOKEINTERFACE
 import org.opalj.br.instructions.MethodInvocationInstruction
+import org.opalj.br.instructions.NonVirtualMethodInvocationInstruction
+import org.opalj.bytecode.JRELibraryFolder
 
 
 object PurityAnalysis extends DefaultOneStepAnalysis {
+
+  override def main(args: Array[String]): Unit = {
+    val lib = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
+
+    for (_ ← 1 to 10) {
+      val p = lib.recreate()
+      val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
+      println(report.toConsoleString.split("\n").slice(0, 2).mkString("\n"))
+    }
+  }
 
   override def doAnalyze(
                           project: Project[URL],
@@ -85,11 +97,11 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     val combinedTime = endTime - startTime
 
     val pureMethods = methodToCellCompleter.filter(_._2.cell.getResult match {
-                                                     case Pure => true
-                                                     case _ => false
-                                                   }).map(_._1)
+      case Pure => true
+      case _ => false
+    }).map(_._1)
 
-    val pureMethodsInfo = pureMethods.map(m => m.toJava(project.classFile(m))).toList.sorted
+    val pureMethodsInfo = pureMethods.map(m => m.toJava).toList.sorted
 
     BasicReport("pure methods analysis:\n"+pureMethodsInfo.mkString("\n")+
       s"\nSETUP TIME: $setupTime"+
@@ -140,8 +152,8 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
             case Some(field) if field.isFinal ⇒
             /* Nothing to do; constants do not impede purity! */
 
-           // case Some(field) if field.isPrivate /*&& field.isNonFinal*/ ⇒
-           // check if the field is effectively final
+            // case Some(field) if field.isPrivate /*&& field.isNonFinal*/ ⇒
+            // check if the field is effectively final
 
             case _ ⇒
               cellCompleter.putFinal(Impure)
@@ -155,32 +167,25 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
           // the computation of the method's purity and are ignored.
           // Let's continue with the evaluation of the next instruction.
 
-          case MethodInvocationInstruction(declaringClassType, _, methodName, methodDescriptor) ⇒
-            import project.lookupMethodDefinition
-            val calleeOpt =
-              try {
-                lookupMethodDefinition(
-                  declaringClassType.asObjectType /* this is safe...*/ ,
-                  methodName,
-                  methodDescriptor
-                )
-              } catch {
-                case t: Throwable => None
-              }
-            calleeOpt match {
-              case None ⇒
-                // We know nothing about the target method (it is not
-                // found in the scope of the current project).
-                cellCompleter.putFinal(Impure)
-                return ;
+          case mii: NonVirtualMethodInvocationInstruction ⇒
+            // We know nothing about the target method (it is not
+            nonVirtualCall(method.classFile.thisType, mii) match {
+              // found in the scope of the current project).
+              case Success(callee) ⇒
 
               case Some(callee) ⇒
                 /* Recall that self-recursive calls are handled earlier! */
-
                 val targetCellCompleter = methodToCellCompleter(callee)
                 hasDependencies = true
                 cellCompleter.cell.whenComplete(targetCellCompleter.cell,_ == Impure, Some(Impure))
+              case _ /* Empty or Failure */ ⇒
+
+                // We know nothing about the target method (it is not
+                // found in the scope of the current project).
+                cellCompleter.putFinal(Impure)
+                return;
             }
+
         }
 
         case NEW.opcode |
@@ -214,4 +219,5 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     }
   }
 }
+
 
