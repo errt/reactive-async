@@ -250,14 +250,17 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
   }
 
   override def putFinal(x: V): Unit = {
+    Counter.inc("Cell.putFinal")
     tryComplete(Success(x), None)
   }
 
   override def putNext(x: V): Unit = {
+    Counter.inc("Cell.putNext")
     tryNewState(x)
   }
 
   override def put(x: V, isFinal: Boolean): Unit = {
+    Counter.inc(s"Cell.put($isFinal)")
     if (isFinal) tryComplete(Success(x), None)
     else tryNewState(x)
   }
@@ -363,7 +366,6 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
    */
   @tailrec
   private[rasync] final def tryNewState(value: V): Unit = {
-    Counter.inc("Cell.tryNewState.invocations")
     state.get match {
       case _: FinalState[V] => // completed with final result already
       // As decided by phaller, we ignore all updates after freeze and do not throw exceptionsCounter.inc("Cell.tryNewState.onFinalState")
@@ -387,7 +389,6 @@ private[rasync] abstract class CellImpl[V](pool: HandlerPool[V], updater: Update
   }
 
   private[rasync] override def tryComplete(value: Try[V], dontCall: Option[Seq[Cell[V]]]): Unit = {
-    Counter.inc("Cell.tryComplete.invocations")
     state.get match {
       case _: FinalState[V] => // completed with final result already
       // As decided by phaller, we ignore all updates after freeze and do not throw exceptionsCounter.inc("Cell.tryComplete.onFinalState")
