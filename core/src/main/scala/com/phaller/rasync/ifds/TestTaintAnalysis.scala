@@ -309,13 +309,13 @@ object Taint extends IFDSPropertyMetaInformation[Fact] {
     new Taint(Map.empty))
 }
 
-object TestTaintAnalysisRunner {
+object TestTaintAnalysisRunner extends App {
 
-  def main(args: Array[String]): Unit = {
+  override def main(args: Array[String]): Unit = {
 
     val p0 = Project(new java.io.File(org.opalj.bytecode.JRELibraryFolder.getAbsolutePath))
     val threads = Try(Integer.parseInt(args(0))).getOrElse(8)
-    val scheduling = args(1) match {
+    val scheduling = Try(args(1)).getOrElse("DefaultScheduling") match {
       case "DefaultScheduling" => DefaultScheduling
       case "SourcesWithManyTargetsFirst" => SourcesWithManyTargetsFirst
       case "SourcesWithManyTargetsLast" => SourcesWithManyTargetsLast
@@ -360,8 +360,8 @@ object TestTaintAnalysisRunner {
             case _ ⇒
           }
         }
-      }) { t ⇒
-        println(s"AVG,$result,${scheduling.getClass.getSimpleName},$threads,$t")
+      }) { time ⇒
+        println(s"AVG,$result,${scheduling.getClass.getSimpleName},$threads,$time")
       }
     }
 
