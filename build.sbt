@@ -58,3 +58,5 @@ lazy val bench: Project = (project in file("bench")).
   dependsOn(core)
 
 javaOptions in ThisBuild ++= Seq("-Xmx27G", "-Xms1024m", "-XX:ThreadStackSize=2048")
+
+mainClass in (Compile, run) := Some("com.phaller.rasync.ifds.TestTaintAnalysisRunner")
