@@ -4,17 +4,17 @@ package lattice
 import com.phaller.rasync.cell.Cell
 
 trait Key[V] {
-  def resolve(cells: Iterable[Cell[V]]): Iterable[(Cell[V], V)]
-  def fallback(cells: Iterable[Cell[V]]): Iterable[(Cell[V], V)]
+  def resolve[K <: Key[V]](cells: Seq[Cell[K, V]]): Seq[(Cell[K, V], V)]
+  def fallback[K <: Key[V]](cells: Seq[Cell[K, V]]): Seq[(Cell[K, V], V)]
 }
 
 class DefaultKey[V] extends Key[V] {
 
-  def resolve(cells: Iterable[Cell[V]]): Iterable[(Cell[V], V)] = {
+  def resolve[K <: Key[V]](cells: Seq[Cell[K, V]]): Seq[(Cell[K, V], V)] = {
     cells.map(cell => (cell, cell.getResult()))
   }
 
-  def fallback(cells: Iterable[Cell[V]]): Iterable[(Cell[V], V)] = {
+  def fallback[K <: Key[V]](cells: Seq[Cell[K, V]]): Seq[(Cell[K, V], V)] = {
     cells.map(cell => (cell, cell.getResult()))
   }
 

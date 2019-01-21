@@ -1,3 +1,4 @@
+/*
 package com.phaller.rasync
 package test
 
@@ -87,3 +88,4 @@ class PoolSuite extends FunSuite {
   }
 
 }
+*/

@@ -1,3 +1,4 @@
+/*
 package com.phaller.rasync.test
 
 import java.util.concurrent.CountDownLatch
@@ -357,3 +358,4 @@ abstract class KeyResolutionSuite extends FunSuite with CompleterFactory {
 class ConcurrentKeyResolutionSuite extends KeyResolutionSuite with ConcurrentCompleterFactory
 
 class SequentialKeyResolutionSuite extends KeyResolutionSuite with SequentialCompleterFactory
+*/

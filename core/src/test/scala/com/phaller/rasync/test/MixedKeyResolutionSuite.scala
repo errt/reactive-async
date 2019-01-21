@@ -1,3 +1,4 @@
+/*
 package com.phaller.rasync.test
 
 import java.util.concurrent.CountDownLatch
@@ -623,3 +624,4 @@ class MixedKeyResolutionSuite extends FunSuite with MixedCompleterFactory {
   }
 
 }
+*/

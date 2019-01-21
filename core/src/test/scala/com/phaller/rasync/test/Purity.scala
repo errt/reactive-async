@@ -1,16 +1,16 @@
+/*
 package com.phaller.rasync
 package test
 
-import com.phaller.rasync.cell.Cell
 import com.phaller.rasync.lattice._
 
 object PurityKey extends Key[Purity] {
 
-  def resolve(cells: Iterable[Cell[Purity]]): Iterable[(Cell[Purity], Purity)] = {
+  def resolve[K <: Key[Purity]](cells: Seq[Cell[K, Purity]]): Seq[(Cell[K, Purity], Purity)] = {
     cells.map(cell => (cell, Pure))
   }
 
-  def fallback(cells: Iterable[Cell[Purity]]): Iterable[(Cell[Purity], Purity)] = {
+  def fallback[K <: Key[Purity]](cells: Seq[Cell[K, Purity]]): Seq[(Cell[K, Purity], Purity)] = {
     cells.map(cell => (cell, Pure))
   }
 
@@ -23,13 +23,16 @@ case object Pure extends Purity
 case object Impure extends Purity
 
 object Purity {
-  implicit object PurityOrdering extends PartialOrderingWithBottom[Purity] {
-    override def lteq(v1: Purity, v2: Purity): Boolean = {
-      if (v1 == UnknownPurity) true
-      else if (v1 == v2) true
-      else false
+
+  implicit object PurityLattice extends Lattice[Purity] {
+    override def join(current: Purity, next: Purity): Purity = {
+      if (current == UnknownPurity) next
+      else if (current == next) current
+      else throw LatticeViolationException(current, next)
     }
 
-    override val bottom: Purity = UnknownPurity
+    override val empty: Purity = UnknownPurity
   }
+
 }
+*/

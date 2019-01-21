@@ -1,3 +1,4 @@
+/*
 package com.phaller.rasync.test
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
@@ -109,3 +110,4 @@ class SequentialSuite extends FunSuite with SequentialCompleterFactory {
   }
 
 }
+*/

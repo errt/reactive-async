@@ -5,14 +5,14 @@ package opal
 import java.net.URL
 
 import com.phaller.rasync.cell._
-import com.phaller.rasync.lattice.Updater
+import com.phaller.rasync.lattice.{Key, Lattice, LatticeViolationException}
 import com.phaller.rasync.pool.HandlerPool
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import org.opalj.Success
-import org.opalj.br.{ ClassFile, Method }
-import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project }
+import org.opalj.br.{ClassFile, Method}
+import org.opalj.br.analyses.{BasicReport, DefaultOneStepAnalysis, Project}
 import org.opalj.br.instructions.GETFIELD
 import org.opalj.br.instructions.GETSTATIC
 import org.opalj.br.instructions.PUTFIELD
@@ -48,38 +48,101 @@ import org.opalj.br.instructions.INVOKEINTERFACE
 import org.opalj.br.instructions.MethodInvocationInstruction
 import org.opalj.br.instructions.NonVirtualMethodInvocationInstruction
 import org.opalj.bytecode.JRELibraryFolder
+import org.opalj.util.{Nanoseconds, PerformanceEvaluation}
+import org.scalatest.FunSuite
 
-import scala.util.Try
 
-object PurityAnalysis extends DefaultOneStepAnalysis {
+object PurityKey extends Key[Purity] {
 
-  override def main(args: Array[String]): Unit = {
+  def resolve[K <: Key[Purity]](cells: Seq[Cell[K, Purity]]): Seq[(Cell[K, Purity], Purity)] = {
+    cells.map(cell => (cell, Pure))
+  }
+
+  def fallback[K <: Key[Purity]](cells: Seq[Cell[K, Purity]]): Seq[(Cell[K, Purity], Purity)] = {
+    cells.map(cell => (cell, Pure))
+  }
+
+  override def toString = "Purity"
+}
+
+sealed trait Purity
+case object UnknownPurity extends Purity
+case object Pure extends Purity
+case object Impure extends Purity
+
+object Purity {
+
+  implicit object PurityLattice extends Lattice[Purity] {
+    override def join(current: Purity, next: Purity): Purity = {
+      if (current == UnknownPurity) next
+      else if (current == next) current
+      else throw LatticeViolationException(current, next)
+    }
+
+    override val empty: Purity = UnknownPurity
+  }
+
+}
+
+class PurityAnalysisTest extends FunSuite {
+  test("main") {
+    PurityAnalysis.main(null)
+  }
+}
+
+
+
+object PurityAnalysis {
+//
+//  override def main(args: Array[String]): Unit = {
+//    val lib = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
+//
+//    for (_ ← 1 to 1) {
+//      val p = lib.recreate()
+//      val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
+//      println(report.toConsoleString.split("\n").slice(0, 2).mkString("\n"))
+//    }
+//  }
+
+  def main(args: Array[String]): Unit = {
     val lib = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
 
-    for (_ ← 1 to 1) {
-      val p = lib.recreate()
-      val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
-      println(report.toConsoleString.split("\n").slice(0, 2).mkString("\n"))
+    var lastAvg = 0L
+    for (
+      threads <- List(1, 2, 4, 8, 16, 32)
+    ) {
+      PerformanceEvaluation.time(2, 4, 3, {
+        val p = lib.recreate()
+        val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
+      }) { (_, ts) ⇒
+        val sTs = ts.map(_.toSeconds).mkString(", ")
+        val avg = ts.map(_.timeSpan).sum / ts.size
+        if (lastAvg != avg) {
+          lastAvg = avg
+          val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
+          println(s"RES: #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
+        }
+      }
+      println(s"AVG,$threads,$lastAvg")
     }
   }
 
-  override def doAnalyze(
+
+  def doAnalyze(
     project: Project[URL],
     parameters: Seq[String] = List.empty,
     isInterrupted: () ⇒ Boolean): BasicReport = {
 
     val startTime = System.currentTimeMillis // Used for measuring execution time
     // 1. Initialization of key data structures (one cell(completer) per method)
-    implicit val pool: HandlerPool[Purity] = new HandlerPool(PurityKey)
-    var methodToCell = Map.empty[Method, Cell[Purity]]
+    implicit val pool: HandlerPool = new HandlerPool()
+    var methodToCellCompleter = Map.empty[Method, CellCompleter[PurityKey.type, Purity]]
     for {
       classFile <- project.allProjectClassFiles
       method <- classFile.methods
     } {
-      val cell = pool.mkCell(_ => {
-        analyze(project, methodToCell, classFile, method)
-      })(Updater.partialOrderingToUpdater)
-      methodToCell = methodToCell + ((method, cell))
+      val cellCompleter = CellCompleter[PurityKey.type, Purity](pool, PurityKey)
+      methodToCellCompleter = methodToCellCompleter + ((method, cellCompleter))
     }
 
     val middleTime = System.currentTimeMillis
@@ -89,7 +152,7 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       classFile <- project.allProjectClassFiles.par
       method <- classFile.methods
     } {
-      methodToCell(method).trigger()
+      pool.execute(() => analyze(project,methodToCellCompleter,classFile, method))
     }
     val fut = pool.quiescentResolveCell
     Await.ready(fut, 30.minutes)
@@ -101,10 +164,10 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     val analysisTime = endTime - middleTime
     val combinedTime = endTime - startTime
 
-    val pureMethods = methodToCell.filter(_._2.getResult() match {
+    val pureMethods = methodToCellCompleter.filter(_._2.cell.getResult match {
       case Pure => true
       case _ => false
-    }).keys
+    }).map(_._1)
 
     val pureMethodsInfo = pureMethods.map(m => m.toJava).toList.sorted
 
@@ -118,23 +181,26 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
    * Determines the purity of the given method.
    */
   def analyze(
-    project: Project[URL],
-    methodToCell: Map[Method, Cell[Purity]],
-    classFile: ClassFile,
-    method: Method): Outcome[Purity] = {
+               project: Project[URL],
+               methodToCellCompleter: Map[Method, CellCompleter[PurityKey.type, Purity]],
+               classFile : ClassFile,
+               method: Method
+             ): Unit = {
     import project.nonVirtualCall
 
-    val cell = methodToCell(method)
+    val cellCompleter = methodToCellCompleter(method)
 
     if ( // Due to a lack of knowledge, we classify all native methods or methods that
     // belong to a library (and hence lack the body) as impure...
     method.body.isEmpty /*HERE: method.isNative || "isLibraryMethod(method)"*/ ||
       // for simplicity we are just focusing on methods that do not take objects as parameters
       method.parameterTypes.exists(!_.isBaseType)) {
-      return FinalOutcome(Impure)
+      cellCompleter.putFinal(Impure)
+      return;
     }
 
-    val dependencies = scala.collection.mutable.Set.empty[Method]
+    var hasDependencies = false
+    //val dependencies = scala.collection.mutable.Set.empty[Method]
     val declaringClassType = classFile.thisType
     val methodDescriptor = method.descriptor
     val methodName = method.name
@@ -152,14 +218,16 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
           import project.resolveFieldReference
           resolveFieldReference(declaringClass, fieldName, fieldType) match {
 
-            case Some(field) if field.isFinal ⇒ NoOutcome
+            case Some(field) if field.isFinal ⇒ ;
             /* Nothing to do; constants do not impede purity! */
 
             // case Some(field) if field.isPrivate /*&& field.isNonFinal*/ ⇒
             // check if the field is effectively final
 
             case _ ⇒
-              return FinalOutcome(Impure);
+
+              cellCompleter.putFinal(Impure)
+              return ;
           }
 
         case INVOKESPECIAL.opcode | INVOKESTATIC.opcode ⇒ instruction match {
@@ -175,13 +243,17 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
 
               case Success(callee) ⇒
                 /* Recall that self-recursive calls are handled earlier! */
-                dependencies.add(callee)
+                val targetCellCompleter = methodToCellCompleter(callee)
+                hasDependencies = true
+                cellCompleter.cell.whenComplete(targetCellCompleter.cell,_ == Impure, Some(Impure))
 
               case _ /* Empty or Failure */ ⇒
 
                 // We know nothing about the target method (it is not
                 // found in the scope of the current project).
-                return FinalOutcome(Impure)
+
+                cellCompleter.putFinal(Impure)
+                return ;
             }
 
         }
@@ -201,7 +273,9 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
           ARRAYLENGTH.opcode |
           MONITORENTER.opcode | MONITOREXIT.opcode |
           INVOKEDYNAMIC.opcode | INVOKEVIRTUAL.opcode | INVOKEINTERFACE.opcode ⇒
-          return FinalOutcome(Impure)
+
+          cellCompleter.putFinal(Impure)
+          return ;
 
         case _ ⇒
         /* All other instructions (IFs, Load/Stores, Arith., etc.) are pure. */
@@ -209,24 +283,12 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
       currentPC = body.pcOfNextInstruction(currentPC)
     }
 
-    // Every method that is not identified as being impure is (conditionally) pure.
-    if (dependencies.isEmpty) {
-      FinalOutcome(Pure)
-    } else {
-      cell.when(dependencies.map(methodToCell).toSeq: _*)(c)
-      NextOutcome(UnknownPurity) // == NoOutcome
+    // Every method that is not identified as being impure is (conditionally)pure.
+    if (!hasDependencies) {
+      cellCompleter.putFinal(Pure)
+      //println("Immediately Pure Method: "+method.toJava(classFile))
     }
+
   }
 
-  def c(v: Iterable[(Cell[Purity], Try[ValueOutcome[Purity]])]): Outcome[Purity] = {
-    // If any dependee is Impure, the dependent Cell is impure.
-    // Otherwise, we do not know anything new.
-    // Exception will be rethrown.
-    if (v.collectFirst({
-      case (_, scala.util.Success(FinalOutcome(Impure))) => true
-      case (_, scala.util.Failure(_)) => true
-    }).isDefined)
-      FinalOutcome(Impure)
-    else NoOutcome
-  }
 }

@@ -1,3 +1,4 @@
+/*
 package com.phaller.rasync
 package cell
 
@@ -118,3 +119,4 @@ private[rasync] class SequentialCallbackRunnable[V](override val pool: HandlerPo
   override def run(): Unit =
     dependentCompleter.sequential(callCallback _, prio)
 }
+*/

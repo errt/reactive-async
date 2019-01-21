@@ -1,3 +1,4 @@
+/*
 package com.phaller.rasync.test.lattice
 
 import com.phaller.rasync.cell.Cell
@@ -30,3 +31,4 @@ class IntUpdater extends Updater[Int] {
   override val bottom: Int = 0
 }
 
+*/

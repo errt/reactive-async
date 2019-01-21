@@ -1,3 +1,4 @@
+/*
 package com.phaller.rasync
 package test
 
@@ -308,3 +309,4 @@ class LazySuite extends FunSuite {
   }
 }
 
+*/
