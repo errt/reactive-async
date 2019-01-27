@@ -198,14 +198,16 @@ class HandlerPool[V](
     try {
       val results = k(cells)
       val dontCall = results.map(_._1).toSeq
-      for ((c, v) <- results)
+      for ((c, v) <- results) {
+        val res = Success(v)
         execute(new Runnable {
           override def run(): Unit = {
             // resolve each cell with the given value
             // but do not propagate among the cells in the same set (i.e. the same cSCC)
-            c.resolveWithValue(Success(v), dontCall)
+            c.resolveWithValue(res, dontCall)
           }
-        }, schedulingStrategy.calcPriority(c))
+        }, schedulingStrategy.calcPriority(c, res))
+      }
       results.nonEmpty
     } catch {
       case e: Exception =>
@@ -213,7 +215,7 @@ class HandlerPool[V](
         val f = Failure(e)
         val dontCall = cells.toSeq
         cells.foreach(c =>
-          execute(() => c.resolveWithValue(f, dontCall), schedulingStrategy.calcPriority(c)))
+          execute(() => c.resolveWithValue(f, dontCall), schedulingStrategy.calcPriority(c, f)))
         cells.nonEmpty
     }
   }

@@ -1,6 +1,9 @@
 package com.phaller.rasync.pool
 
 import com.phaller.rasync.cell.Cell
+import com.phaller.rasync.cell.ValueOutcome
+
+import scala.util.Try
 
 /**
  * A scheduling strategy defines priorities for dependency callbacks
@@ -22,73 +25,73 @@ import com.phaller.rasync.cell.Cell
  * `SchedulingStrategy.calcPriority(cell)` is called.
  */
 trait SchedulingStrategy {
-  def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int
-  def calcPriority[V](dependentCell: Cell[V]): Int
+  def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int
+  def calcPriority[V](dependentCell: Cell[V], value: Try[V]): Int
   override def toString: String = this.getClass.getSimpleName
 }
 
 /** All tasks are of equal priority. */
 object DefaultScheduling extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int = 0
-  override def calcPriority[V](cell: Cell[V]): Int = 0
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int = 0
+  override def calcPriority[V](cell: Cell[V], value: Try[V]): Int = 0
 }
 
 object SourcesWithManyTargetsFirst extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     -other.numDependentCells
 
-  override def calcPriority[V](cell: Cell[V]): Int =
+  override def calcPriority[V](cell: Cell[V], value: Try[V]): Int =
     -cell.numDependentCells
 }
 
 object SourcesWithManyTargetsLast extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     other.numDependentCells
 
-  override def calcPriority[V](cell: Cell[V]): Int =
+  override def calcPriority[V](cell: Cell[V], value: Try[V]): Int =
     cell.numDependentCells
 }
 
 object SourcesWithManySourcesFirst extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     -other.numDependencies
 
-  override def calcPriority[V](cell: Cell[V]): Int =
+  override def calcPriority[V](cell: Cell[V], value: Try[V]): Int =
     -cell.numDependencies
 }
 
 object SourcesWithManySourcesLast extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     other.numDependencies
 
-  override def calcPriority[V](cell: Cell[V]): Int =
+  override def calcPriority[V](cell: Cell[V], value: Try[V]): Int =
     cell.numDependencies
 }
 
 object TargetsWithManySourcesFirst extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     -dependentCell.numDependencies
 
-  override def calcPriority[V](cell: Cell[V]): Int = 0
+  override def calcPriority[V](cell: Cell[V], value: Try[V]): Int = 0
 }
 
 object TargetsWithManySourcesLast extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     dependentCell.numDependencies
 
-  override def calcPriority[V](dependentCell: Cell[V]): Int = 0
+  override def calcPriority[V](dependentCell: Cell[V], value: Try[V]): Int = 0
 }
 
 object TargetsWithManyTargetsFirst extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     -dependentCell.numDependencies
 
-  override def calcPriority[V](dependentCell: Cell[V]): Int = 0
+  override def calcPriority[V](dependentCell: Cell[V], value: Try[V]): Int = 0
 }
 
 object TargetsWithManyTargetsLast extends SchedulingStrategy {
-  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V]): Int =
+  override def calcPriority[V](dependentCell: Cell[V], other: Cell[V], value: Try[ValueOutcome[V]]): Int =
     dependentCell.numDependentCells
 
-  override def calcPriority[V](dependentCell: Cell[V]): Int = 0
+  override def calcPriority[V](dependentCell: Cell[V], value: Try[V]): Int = 0
 }

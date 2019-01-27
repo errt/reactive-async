@@ -245,15 +245,14 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: 
   def collectResult(node: CFGNode)(implicit state: State): Map[Statement, Set[DataFlowFact]] =
     node.predecessors.foldLeft(Map.empty[Statement, Set[DataFlowFact]]) { (curMap, nextBB: CFGNode) ⇒
       val bb = nextBB.asBasicBlock
-      if(state.outgoing.contains(bb) && state.outgoing(bb).contains(node)) {
+      if (state.outgoing.contains(bb) && state.outgoing(bb).contains(node)) {
         val index = bb.endPC
         curMap + (Statement(
           state.method,
           state.code(index),
           index,
           state.code,
-          state.cfg
-        ) → state.outgoing(bb)(node))
+          state.cfg) → state.outgoing(bb)(node))
       } else curMap
     }
 
@@ -262,8 +261,8 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: 
    */
   def createResult()(implicit state: State): Outcome[IFDSProperty[DataFlowFact]] = {
     val result = //mergeMaps(
-      collectResult(state.cfg.normalReturnNode)//,
-      //collectResult(state.cfg.abnormalReturnNode))
+      collectResult(state.cfg.normalReturnNode) //,
+    //collectResult(state.cfg.abnormalReturnNode))
 
     val dependees = state.ifdsDependees // TAC is fixed, so don't add deps for TAC
 
@@ -482,8 +481,8 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: 
           fromCall = mergeMaps(
             fromCall,
             //mergeMaps(
-              collectResult(state.cfg.normalReturnNode)//,
-              //collectResult(state.cfg.abnormalReturnNode))
+            collectResult(state.cfg.normalReturnNode) //,
+          //collectResult(state.cfg.abnormalReturnNode))
           )
         } else {
           val e = (callee, fact)
@@ -603,7 +602,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact](parallelism: Int, scheduling: 
       val cfg = c.cfg
 
       exits.computeIfAbsent(method, _ ⇒ {
-        (/*cfg.abnormalReturnNode.predecessors ++*/ cfg.normalReturnNode.predecessors).map {
+        ( /*cfg.abnormalReturnNode.predecessors ++*/ cfg.normalReturnNode.predecessors).map {
           block ⇒
             val endPC = block.asBasicBlock.endPC
             Statement(method, code(endPC), endPC, code, cfg)

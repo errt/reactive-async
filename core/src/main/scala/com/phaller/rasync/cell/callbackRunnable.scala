@@ -41,7 +41,7 @@ private[rasync] abstract class CallbackRunnable[V] extends Runnable with OnCompl
       // part of this update.
       // This computation of prio is not thread-safe but this does not matter for
       // priorities are no hard requirement anyway.
-      prio = Math.min(prio, pool.schedulingStrategy.calcPriority(dependentCompleter.cell, other))
+      prio = Math.min(prio, pool.schedulingStrategy.calcPriority(dependentCompleter.cell, other, other.getState()))
 
       // The first incoming update (since the last execution) starts this runnable.
       // Other cells might still be added to updatedDependees concurrently, the runnable
