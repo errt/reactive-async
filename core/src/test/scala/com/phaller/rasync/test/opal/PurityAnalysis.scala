@@ -2,17 +2,18 @@ package com.phaller.rasync
 package test
 package opal
 
+import java.io.File
 import java.net.URL
 
 import com.phaller.rasync.cell._
 import com.phaller.rasync.lattice.Updater
-import com.phaller.rasync.pool.HandlerPool
+import com.phaller.rasync.pool._
+import org.opalj.Success
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import org.opalj.Success
 import org.opalj.br.{ ClassFile, Method }
-import org.opalj.br.analyses.{ BasicReport, DefaultOneStepAnalysis, Project }
+import org.opalj.br.analyses.{ BasicReport, Project }
 import org.opalj.br.instructions.GETFIELD
 import org.opalj.br.instructions.GETSTATIC
 import org.opalj.br.instructions.PUTFIELD
@@ -48,46 +49,108 @@ import org.opalj.br.instructions.INVOKEINTERFACE
 import org.opalj.br.instructions.MethodInvocationInstruction
 import org.opalj.br.instructions.NonVirtualMethodInvocationInstruction
 import org.opalj.bytecode.JRELibraryFolder
+import org.opalj.util.{ Nanoseconds, PerformanceEvaluation }
+import org.scalatest.FunSuite
 
-import scala.util.Try
+import scala.util.{ Failure, Try }
 
-object PurityAnalysis extends DefaultOneStepAnalysis {
+class PurityAnalysisTest extends FunSuite {
+  test("main") {
+    PurityAnalysis.main(null)
+  }
+}
 
-  override def main(args: Array[String]): Unit = {
-    val lib = Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
+object PurityStrategy extends SchedulingStrategy {
+  override def calcPriority[Purity](dependentCell: Cell[Purity], other: Cell[Purity], value: Try[ValueOutcome[Purity]]): Int = value match {
+    case scala.util.Success(FinalOutcome(Impure)) => -1
+    case _ => 1
+  }
 
-    for (_ ← 1 to 1) {
-      val p = lib.recreate()
-      val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
-      println(report.toConsoleString.split("\n").slice(0, 2).mkString("\n"))
+  override def calcPriority[Purity](dependentCell: Cell[Purity], value: Try[Purity]): Int = value match {
+    case scala.util.Success(Pure) => 0
+    case _ => -1
+  }
+}
+
+object PurityAnalysis {
+
+  val library =
+    "batik"
+  // "ij"
+
+  val batikPath = "batik-1.7/"
+
+  def main(args: Array[String]): Unit = {
+    val lib = library match {
+      case "batik" =>
+        val classFiles = Project.JavaClassFileReader().ClassFiles(new File(batikPath + "project/bin.zip"))
+        val libClassFiles = Project.JavaClassFileReader().ClassFiles(new File(batikPath + "project/default-lib")) ++ Project.JavaClassFileReader().ClassFiles(org.opalj.bytecode.JRELibraryFolder)
+        Project(
+          classFiles,
+          libClassFiles,
+          libraryClassFilesAreInterfacesOnly = false,
+          Traversable.empty)
+      case "ij" =>
+        val classFiles = Project.JavaClassFileReader().ClassFiles(new File("/data/Programme/IntelliJ/lib/java-impl.jar"))
+        val libClassFiles = Project.JavaClassFileReader().ClassFiles(org.opalj.bytecode.JRELibraryFolder)
+        Project(
+          classFiles,
+          libClassFiles,
+          libraryClassFilesAreInterfacesOnly = false,
+          Traversable.empty)
+      case _ => Project(new java.io.File(JRELibraryFolder.getAbsolutePath))
+    }
+    println("NUMBER OF METHODS* = " + lib.allMethodsWithBody.size)
+
+    var lastAvg = 0L
+    for (
+      scheduling <- List(PurityStrategy, DefaultScheduling, SourcesWithManyTargetsFirst, SourcesWithManyTargetsLast, TargetsWithManySourcesFirst, TargetsWithManySourcesLast, TargetsWithManyTargetsFirst, TargetsWithManyTargetsLast, SourcesWithManySourcesFirst, SourcesWithManySourcesLast);
+      threads <- List(1, 2, 4, 16, 32)
+    ) {
+      PerformanceEvaluation.time(3, 6, 3, {
+        val p = lib.recreate()
+        val report = PurityAnalysis.doAnalyze(p, List.empty, () => false)
+      }) { (_, ts) ⇒
+        val sTs = ts.map(_.toSeconds).mkString(", ")
+        val avg = ts.map(_.timeSpan).sum / ts.size
+        if (lastAvg != avg) {
+          lastAvg = avg
+          val avgInSeconds = new Nanoseconds(lastAvg).toSeconds
+          println(s"RES: Scheduling = ${scheduling.getClass.getSimpleName}, #threads = $threads, avg = $avgInSeconds;Ts: $sTs")
+        }
+      }
+      println(s"AVG,${scheduling.getClass.getSimpleName},$threads,$lastAvg")
     }
   }
 
-  override def doAnalyze(
+  def doAnalyze(
     project: Project[URL],
     parameters: Seq[String] = List.empty,
     isInterrupted: () ⇒ Boolean): BasicReport = {
 
-    val startTime = System.currentTimeMillis // Used for measuring execution time
     // 1. Initialization of key data structures (one cell(completer) per method)
     implicit val pool: HandlerPool[Purity] = new HandlerPool(PurityKey)
     var methodToCell = Map.empty[Method, Cell[Purity]]
-    for {
-      classFile <- project.allProjectClassFiles
-      method <- classFile.methods
-    } {
+    var i = 0
+    for (method <- project.allMethods) {
+      //    for {
+      //      classFile <- project.allProjectClassFiles
+      //      method <- classFile.methods
+      //    } {
       val cell = pool.mkCell(_ => {
-        analyze(project, methodToCell, classFile, method)
+        analyze(project, methodToCell, method.classFile, method)
       })(Updater.partialOrderingToUpdater)
       methodToCell = methodToCell + ((method, cell))
+      i = i + 1
     }
-
-    val middleTime = System.currentTimeMillis
+    //println(s"NUMBER OF CELLS = $i")
+    //return BasicReport("");
 
     // 2. trigger analyses
     for {
-      classFile <- project.allProjectClassFiles.par
-      method <- classFile.methods
+      //      classFile <- project.allProjectClassFiles.par
+      //      method <- classFile.methods
+      method <- project.allMethods
     } {
       methodToCell(method).trigger()
     }
@@ -95,29 +158,13 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     Await.ready(fut, 30.minutes)
     pool.shutdown()
 
-    val endTime = System.currentTimeMillis
-
-    val setupTime = middleTime - startTime
-    val analysisTime = endTime - middleTime
-    val combinedTime = endTime - startTime
-
-    val pureMethods = methodToCell.filter(_._2.getResult() match {
-      case Pure => true
-      case _ => false
-    }).keys
-
-    val pureMethodsInfo = pureMethods.map(m => m.toJava).toList.sorted
-
-    BasicReport(s"pure methods analysis:\nPURE=${pureMethods.size}\n\n" + pureMethodsInfo.mkString("\n") +
-      s"\nSETUP TIME: $setupTime" +
-      s"\nANALYIS TIME: $analysisTime" +
-      s"\nCOMBINED TIME: $combinedTime")
+    BasicReport("")
   }
 
   /**
    * Determines the purity of the given method.
    */
-  def analyze(
+  private def analyze(
     project: Project[URL],
     methodToCell: Map[Method, Cell[Purity]],
     classFile: ClassFile,
@@ -230,3 +277,4 @@ object PurityAnalysis extends DefaultOneStepAnalysis {
     else NoOutcome
   }
 }
+
