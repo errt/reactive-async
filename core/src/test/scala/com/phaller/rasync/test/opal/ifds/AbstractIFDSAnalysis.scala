@@ -299,7 +299,7 @@ abstract class AbstractIFDSAnalysis[DataFlowFact <: AbstractIFDSFact](parallelis
       FinalOutcome(propertyValue)
     } else {
       val thisCell = cell(state.source)
-      thisCell.when(dependees)(cont)
+      dependees.foreach(d ⇒ thisCell.when(d)(cont))
       NextOutcome(propertyValue)
     }
   }
